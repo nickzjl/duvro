@@ -6,7 +6,7 @@ Companion to `prd.md` (v1.4), `UI_NOTES.md` (design system, motion spec, mockup 
 
 1. **Taste is the moat; selection is the hook.** Apple/Instagram can ship "AI select best photos" natively — they can't ship opinionated Pinterest-girl aesthetics. Vibe Packs are the product; the selection AI is the demo that earns the install. Allocate polish time accordingly.
 2. **Humans pick for emotion, vision models pick for quality.** A blurry photo with the user's best friend beats a perfect sunset. Scoring must weight recurring people and groups; selection must produce a *varied* dump (people/place/food/detail), not a homogeneous quality ranking. Users forgive mediocre edits before they forgive bad photo choices.
-3. **Momentum over judgment.** Curation results are revealed as a ~3s animated showcase that flows straight into editing — never a static results grid that invites the user to sit and judge the AI. Corrections happen late (skip during edits; remove/swap at confirmation), after the user is invested.
+3. **Momentum over judgment.** Curation results are revealed as an animated showcase (exact timing in UI_NOTES §4) that flows straight into editing — never a static results grid that invites the user to sit and judge the AI. Corrections happen late (skip during edits; remove/swap at confirmation), after the user is invested.
 4. **Humility in copy.** "our favorites ✨" — never "the best photos." "what we left out" — never "rejected." A wrong pick should feel like a taste difference, not a malfunction.
 5. **The bar:** users should feel "these are exactly the photos I would've picked, only better." Tested, not vibed — see the overlap test in Phase 3.
 
@@ -100,8 +100,8 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 - [ ] Lands here directly after the last edit — NO "ready to post? / take another look" branch (see UI_NOTES §3)
 - [ ] **Instagram-style swipeable carousel preview** of the exact post (correct order, edited images, uniform 4:5)
 - [ ] Per-photo adjust (same advanced sheet), remove photo, drag-to-reorder via thumbnail strip
-- [ ] **"what we left out"** row: the stored adaptive 2–5 runner-ups, "almost made it" label, **persistent + on each thumbnail** (no hover states — touch only), tap to **add** (if under count) or **replace**; newly added photos route through the 3-way edit before joining
-- [ ] All copy per voice rules ("our favorites ✨")
+- [ ] **"what we left out"** row: the stored adaptive 2–5 runner-ups, **persistent + on each thumbnail** (no hover states — touch only), tap to **add** (if under count) or **replace**; newly added photos route through the 3-way edit before joining
+- [ ] All copy per voice rules ("our favorites")
 - **Accept:** preview matches final export 1:1; add/replace/remove/reorder all round-trip correctly; runner-up count varies with near-miss data.
 
 ### Phase 7 — Export + "ready when you are"
@@ -115,7 +115,7 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 
 ### Phase 8 — Remaining packs + pack preview
 - [ ] **Digicam** pack: **Light Leak** (warm red-orange glare, per reference) / **Polaroid** (white frame on 4:5 canvas) / **Y2K Digicam** (cool early-digital grade + yellow timestamp)
-- [ ] **Travel Film** pack: Kodak-style / Faded Postcard / Deep Teal
+- [ ] **Travel Film** pack: Kodak Style / Faded Postcard / Deep Teal
 - [ ] Pack preview sheet: tapping a pack card opens it → ~5 bundled sample images rendered with the pack (own/licensed images; render at build or first launch and cache); sheet CTA "use this vibe" both selects the pack and starts curation
 - [ ] Vibe select screen final: pack cards with cover imagery, full variant names (see UI_NOTES fix #3), no separate preview link
 - **Accept:** all 3 packs pass the 10-diverse-photos eyeball test; previews load instantly; taste bar — at least one TestFlight tester asks "what filter is this?" unprompted. Packs are the product: if a pack is merely fine, keep tuning.
@@ -143,9 +143,9 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 
 - **Fonts:** display = Newsreader (serif, OFL, bundled); UI/body = Inter. Max 2 fonts
 - **Colors:** background Warm Ivory `#F7F4EE`; elevated Pure Cream `#FFFCF7`; secondary surface Soft Paper `#EEE9DF`; primary text Ink Black `#171614`; secondary Warm Gray `#777169`; muted Stone `#A7A097`; accent Terracotta `#A04021` (pressed `#7F3319`); divider Hairline Beige `#DDD6CA`; success Muted Sage `#71816C`
-- **Shape/space:** 8pt grid; 20pt page padding; buttons 54pt tall, 18pt radius; cards 12–18pt radius, continuous corners; sheets 28pt radius; shadows y4/blur18/6% max — prefer borders and tonal separation
+- **Shape/space:** 8pt grid; 20pt page padding; buttons 54pt tall, full-radius pill (27pt at 54pt); cards 12–18pt radius, continuous corners; sheets 28pt radius; shadows y4/blur18/6% max — prefer borders and tonal separation
 - **Texture:** 2–4% film-grain overlay; photos dominate every screen (60–80% of visual area)
-- **Copy voice:** humble bestie, lowercase-leaning, never authoritative. "our favorites ✨" not "Best Photos"; "almost made it" not "Rejected"; "ready when you are" not "Export Complete". No exclamation-point salesmanship. Never "AI optimized" / "algorithmically ranked" / "perfect photos"
+- **Copy voice:** humble bestie, lowercase-leaning, never authoritative. "our favorites" not "Best Photos"; "almost made it" not "Rejected"; "ready when you are" not "Export Complete". No exclamation-point salesmanship. Never "AI optimized" / "algorithmically ranked" / "perfect photos"
 - **Prune from Stitch output when translating:** profile avatars, menu icons, "STEP X OF 6" overlines, any account-implying chrome — duvro has no accounts
 - **Pack-first hierarchy:** vibe-select is the emotional home; pack cards get the richest treatment
 - Claude Code: match tokens exactly; when in doubt, more whitespace and fewer elements

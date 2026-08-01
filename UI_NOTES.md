@@ -17,16 +17,19 @@ The mockups mix two visual languages. **Unify everything to this system:**
 - **Accent:** terracotta `#A04021` (pressed `#7F3319`) — used ONLY for: selected states, the handwritten-style helper notes, and pack variant names. Never for primary buttons.
 - **Primary buttons:** black `#171614` fill, white text, full-radius pill, 54pt tall. (The mockups show both black pills and terracotta rectangles — **black pill wins everywhere**, including "use this vibe," which is currently terracotta.)
 - **Dividers/borders:** `#DDD6CA`, 1px
+- **Success:** Muted Sage `#71816C`
 - **Type:** display/headlines and pack names = **Newsreader** (serif); UI/body/buttons = **Inter**. Handwritten accent (Caveat) allowed for at most one helper note per screen, e.g. "7 is the sweet spot."
 - **Case:** lowercase headlines and buttons throughout. The handoff screen currently uses sentence-case body copy ("Your curation is polished...") — convert all body copy to the same lowercase-leaning voice as the rest of the app.
 - **Texture:** 2–4% film grain overlay, app-wide.
 - **Shape:** cards 12–18pt radius, continuous corners; whisper shadows only (y4/blur18/6%).
+- **Spacing:** 8pt grid; 20pt page padding; sheets 28pt radius.
 - **Photos:** every photo displayed at **4:5** everywhere in the app — edit screen, preview, handoff strip. Instagram locks carousels to the first slide's ratio, so a consistent 4:5 makes the in-app preview honest. (Mockups mix square and portrait — normalize.)
 
 ## 2. Fix list (mockup → correct behavior)
 
 ### Must fix
 1. **Three-way edit: keep the clean pill layout, but make the variants comparable.** The mockup's single-photo + three-pill layout is the approved visual design — do NOT replace it with a three-up grid. The one gap to close: the user currently has to tap blind. Add (a) **horizontal swipe on the photo** to move between the three variants, with the pill highlighting in sync, and (b) **pre-render all three** so switching is instant with a crossfade, never a load. Optional if it stays clean: tiny rendered thumbnails inside the pills. Goal is comparison at a glance without adding visual clutter.
+   **Advance mechanic:** tapping a pill or swiping the photo only changes which variant is displayed (pill and photo stay in sync) — neither action advances to the next photo. Variant 1 of the selected pack is pre-selected on arrival, so a user who likes it advances in a single tap. The primary button at the bottom commits the currently displayed variant and advances to the next photo; the back control returns to the previous photo with its pick intact and re-editable.
 2. **Add progress to the edit screen:** "3 of 7" at the top. Users in a per-photo loop need to see the end.
 3. **Vibe selection variant names must be complete and correct:** Golden Hour = Sun-kissed · Warm Film · Soft Glow (mockup wrongly shows "Warm Glow" and omits one); Travel Film = Kodak Style · Faded Postcard · Deep Teal. If the row overflows on narrow screens, shrink type or wrap to two lines — never truncate.
 4. **Import minimum:** copy reads "select 20–200 photos." Disable the import button below 20 with a gentle note; curation quality collapses on tiny sets.
@@ -36,11 +39,12 @@ The mockups mix two visual languages. **Unify everything to this system:**
 8. **Curation showcase (screen currently titled "the cloud of memory"):** retitle to **"our favorites"**. Behavior: 3–5 second reveal where the user's OWN selected photos fade in one at a time, building into a collage, then auto-advances into the edit flow. No buttons, no decisions. All imagery must be real user photos — the mockup's placeholder images are broken (browser chrome visible) and are not a reference for content.
 9. **Runner-up "+" affordance must be always visible on iOS** — the mockup reveals it on hover, which doesn't exist on touch. Show a persistent small + on each runner-up thumbnail.
 10. **Runner-up count is adaptive 2–5**, not fixed at 3 (mockup is a static demo). See PRD §4.
+11. **Selected variant pill color:** mockups 09/10/11 (three-way edit) give the selected pill a black fill with white text — the same treatment as the primary CTA, so two black elements compete on one screen and the pill reads as the button. §1 already reserves black for primary buttons and terracotta `#A04021` for selected states. The selected variant pill uses the terracotta accent, not black fill. If a solid terracotta fill reads heavy at pill size, a terracotta 1px border + terracotta text on the cream card surface is the acceptable alternative — decide visually at Phase 5, but black is ruled out either way.
 
 ### Should fix
-11. Welcome screen needs a secondary action: "see how it works" / demo with bundled sample photos. Required so App Review can evaluate the app without a populated camera roll.
-12. Handoff: keep the current 3-step layout (it reads clearly), but step 3 must include **"tap them in order"** — order is the one thing that silently breaks the post if the user gets it wrong. Add the "caption copied — just paste ✨" toast on arrival. "View album" secondary action and the publishing disclosure are optional polish, not blockers.
-13. Per-photo edit headlines ("this one feels special," "there's beauty in this") are a nice touch from the mockups — keep them, but tie them to why the photo was selected where possible (group shot vs. landscape vs. detail get different copy), and randomize within category so they don't repeat inside one session.
+12. Welcome screen needs a secondary action: "see how it works" / demo with bundled sample photos. Required so App Review can evaluate the app without a populated camera roll.
+13. Handoff: keep the current 3-step layout (it reads clearly), but step 3 must include **"tap them in order"** — order is the one thing that silently breaks the post if the user gets it wrong. Add the "caption copied — just paste ✨" toast on arrival. "View album" secondary action and the publishing disclosure are optional polish, not blockers.
+14. Per-photo edit headlines ("this one feels special," "there's beauty in this") are a nice touch from the mockups — keep them, but tie them to why the photo was selected where possible (group shot vs. landscape vs. detail get different copy), and randomize within category so they don't repeat inside one session.
 
 ## 3. Confirmed flow decisions (these override earlier PRD drafts)
 
@@ -98,6 +102,7 @@ The mockup blurs and dims the photo behind the sheet, so the user cannot see the
 - **Back button** is missing on the first edit screen but present on later ones. Every screen after welcome gets a back control.
 - **Aspect ratios still mixed:** edit screens show square, final review shows portrait. Normalize to 4:5 everywhere (§1).
 - **Final review CTA** reads "save the collection" — wrong model. Should read as continuing to the post, e.g. "add a caption."
+- **Edit screen primary button** reads "save and continue" in the mockups — same objection as above: nothing is saved at that point (no persistence in v1; export happens only at handoff). Canonical label: **"keep this one."**
 - **Caption screen** has a large dead zone and two ghost placeholder cards at the bottom; remove them. "copy and finish" is styled as a text link — promote to the standard black pill button. Header alignment (left) differs from other screens (centered).
 - **Handoff:** body copy is sentence case while the app is lowercase; "Your curated caption" → "your caption." Photo strip still clips behind the button (safe-area inset, §2 fix 5).
 - **Import:** copy says "select up to 200" — add the 20 minimum.
