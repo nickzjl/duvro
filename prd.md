@@ -33,7 +33,7 @@ Both personas: iPhone users, personal (not Creator/Business) Instagram accounts.
 
 1. **Welcome** — one-screen value prop, primary CTA "start a new chapter"; secondary demo entry using bundled sample photos (also serves App Review, which cannot test on an empty photo library).
 2. **Import** — user selects 20–200 photos (native photo picker, limited-library friendly).
-3. **Select vibe** — photo count is a **text input field** (numeric keypad) with helper text "7 is the sweet spot"; below 20 or above 20 photos triggers a gentle message (20 min on import, 20 max per carousel). Tapping a pack card opens its preview.
+3. **Select vibe** — photo count is a **text input field** (numeric keypad) with helper text "7 is the sweet spot"; values below 4 or above 20 trigger a gentle message (4 is the floor — composition variety, people/place/food/detail, can't resolve below that; 20 is the max — that's Instagram's carousel limit); empty/invalid defaults to 7. This is separate from the 20-photo import minimum in step 2. Tapping a pack card opens its preview.
 4. **Vibe preview (required step, not optional)** — the pack card opens a sheet with ~5 bundled sample images in that pack's look; its **"use this vibe" button is the CTA that selects the pack AND starts curation.** There is no separate preview link — this forces the user to actually see each aesthetic before committing.
 5. **Curation progress** — on-device scoring: aesthetic quality PLUS emotional signals (recurring people boosted — someone in 15 of your 200 photos matters to you; group shots boosted); blurry photos, duplicates, and screenshots rejected; selection enforces dump composition (people / places / food / details mix, people-first), not a raw quality ranking.
 6. **Curation showcase (no decisions)** — headline "our favorites". Instead of a static results grid, the chosen photos fade in one at a time over ~3.7s, accumulating into a collage (exact timing in UI_NOTES §4), then flow the user **directly** into editing. Rationale: a results screen is a judgment checkpoint where a disappointed user churns; a reveal creates momentum and gets them invested before they evaluate. There is deliberately no accept/reject step here.
@@ -49,7 +49,7 @@ Both personas: iPhone users, personal (not Creator/Business) Instagram accounts.
 |---|---------|-------|
 | P0.1 | Photo import via PHPicker | Handle limited library permission gracefully |
 | P0.2 | On-device photo scoring & dedupe | Vision framework: quality, faces, blur; recurring-person and group-shot boosts; perceptual-hash similarity clustering; screenshot rejection |
-| P0.3 | Photo count text input | Numeric field, "7 is the sweet spot" helper; import blocked below 20, count capped at 20 |
+| P0.3 | Photo count text input | Numeric field, "7 is the sweet spot" helper; count blocked below 4 (composition variety can't resolve below that) or above 20 (Instagram's carousel limit); empty/invalid defaults to 7. Separate from the 20-photo import minimum |
 | P0.4 | Composition-aware selection | People/place/food/detail variety; no user decision surface at this stage |
 | P0.5 | Curation showcase animation | "our favorites" — staggered fade-in collage of the picks (~3.7s), auto-advances into editing. Timing in UI_NOTES §4 |
 | P0.6 | 3 Vibe Packs × 3 variants each | Core Image filter pipelines (see §6); variants are pack-specific styles |

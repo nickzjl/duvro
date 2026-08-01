@@ -14,7 +14,7 @@ The mockups mix two visual languages. **Unify everything to this system:**
 
 - **Background:** warm ivory `#F7F4EE` · **Elevated cards:** `#FFFCF7` · **Secondary surface:** `#EEE9DF`
 - **Text:** ink black `#171614` · secondary `#777169` · muted `#A7A097`
-- **Accent:** terracotta `#A04021` — used ONLY for: selected states, the handwritten-style helper notes, and pack variant names. Never for primary buttons.
+- **Accent:** terracotta `#A04021` (pressed `#7F3319`) — used ONLY for: selected states, the handwritten-style helper notes, and pack variant names. Never for primary buttons.
 - **Primary buttons:** black `#171614` fill, white text, full-radius pill, 54pt tall. (The mockups show both black pills and terracotta rectangles — **black pill wins everywhere**, including "use this vibe," which is currently terracotta.)
 - **Dividers/borders:** `#DDD6CA`, 1px
 - **Type:** display/headlines and pack names = **Newsreader** (serif); UI/body/buttons = **Inter**. Handwritten accent (Caveat) allowed for at most one helper note per screen, e.g. "7 is the sweet spot."
@@ -63,7 +63,15 @@ Exact values below — no reference files needed. Implement natively in SwiftUI.
 
 **Curation showcase — the signature moment.** Headline: **"our favorites."** The chosen photos fade in one at a time, accumulating into a collage of print-bordered cards. Exact timing (extracted from the approved mockup):
 - **Per-card animation:** 1.2s, ease-out. From `opacity 0, offset y +10pt` → `opacity 1, offset y 0`.
-- **Stagger:** 0.2s between cards (first at 0.1s). ~13 cards → total sequence ≈ 3.7s.
+- **Stagger — scales with photo count, not fixed.** The approved mockup showed 13 cards at a 0.2s stagger totaling ≈3.7s, but card count equals the user's chosen photo count (4–20 per PRD §4), so a fixed 0.2s stagger would make the sequence run anywhere from 1.9s to 5.1s. **The "~13 cards → 3.7s" figure was a mockup artifact, not a spec — do not reintroduce a fixed stagger.** Instead:
+  ```
+  n = number of selected photos
+  first card delay = 0.1s
+  stagger = clamp((3.4 - 1.3) / (n - 1), 0.10, 0.28)   // seconds between cards
+  total   = 0.1 + (n - 1) * stagger + 1.2               // seconds, end-to-end
+  ```
+  Guard `n = 1` separately (the stagger formula divides by `n - 1`): there's no gap to compute, so the sequence is just the first card's delay plus its animation.
+  Worked examples: n=7 → stagger 0.28s (clamped), total ≈2.98s. n=13 → stagger 0.175s, total ≈3.4s. n=20 → stagger 0.11s, total ≈3.39s. n=1 → single card, ≈1.3s.
 - **Rotation: 0°.** Cards are aligned, not scattered — the mockup's polish comes from overlap and layering, not tilt.
 - Cards overlap with varied z-order and size; layout is a fixed collage, not a grid.
 - All images are the user's real photos from this session — that's the entire hook.

@@ -46,7 +46,7 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 ## 2. Phase checklist
 
 ### Phase 0 — Project setup
-- [ ] Create Xcode project (bundle id `com.duvro.app` or matching final identifier)
+- [ ] Create Xcode project (bundle id `app.duvro.duvro`)
 - [ ] Git init, `.gitignore` for Xcode, first commit
 - [ ] Add `CLAUDE.md`: paste "Ground rules" + product thesis + current phase status (keep updated every session)
 - [ ] Min deployment iOS 18, portrait lock, iPhone only
@@ -74,11 +74,11 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 - **Accept:** 100 photos scored in ≤15s on a real iPhone; screenshots flagged; scores eyeball-correct on the debug grid.
 
 ### Phase 3 — Curation + count input + showcase
-- [ ] **Photo count text input** on the vibe screen: numeric keypad, helper text "7 is the sweet spot"; values > 20 blocked with "20 is the max — that's Instagram's carousel limit"; import requires ≥20 photos selected; empty/invalid defaults to 7
+- [ ] **Photo count text input** on the vibe screen: numeric keypad, helper text "7 is the sweet spot"; values < 4 blocked with a gentle note (composition variety — people/place/food/detail — can't resolve below 4); values > 20 blocked with "20 is the max — that's Instagram's carousel limit"; import requires ≥20 photos selected (separate from this floor); empty/invalid defaults to 7
 - [ ] Duplicate clustering: pairwise feature-print distance; greedy selection by composite score with distance threshold (start 0.55, tune with real bursts)
 - [ ] **Composition-aware selection:** enforce category variety (7-dump target ≈ 3–4 people / 2 place / 1 food / 1 detail; degrade gracefully; people-first). A dump of 7 sunsets is a selection failure even if they score highest
 - [ ] Rejection pass: utility images, score floor, near-black/near-white exposure
-- [ ] **Curation showcase (replaces any results grid):** ~3s animated reveal flashing through the chosen photos (fast crossfade or hard-cut montage per design direction), auto-advancing into the edit flow. No buttons, no decisions, no scores
+- [ ] **Curation showcase (replaces any results grid):** staggered fade-in collage of print-bordered cards — the user's chosen photos fade in one at a time (per-card 1.2s ease-out, opacity 0→1 with y offset +10pt→0, rotation 0°), overlapping with varied z-order and size, then auto-advances into the edit flow. No buttons, no decisions, no scores. UI_NOTES §4 is the authority for exact timing — see also the duration formula there (stagger scales with photo count, not a fixed 0.2s)
 - [ ] Compute and store the adaptive runner-up set now (2–5 emotional near-misses; many near-misses → 5, clean separation → 2) for use on the final review screen
 - **Accept:** (a) burst of 10 near-identical selfies + 50 mixed → exactly one from the burst; (b) a roll with obvious people-shots never yields an all-landscape dump; (c) showcase runs smoothly and lands on photo 1's edit screen with variants already rendered; (d) **overlap test** (via debug build): 3 real users hand-pick 7 from their own ~100 photos → AI overlap ≥4/7 OR user rates the AI set good/better. If this fails, stop and re-tune before further phases.
 
@@ -142,7 +142,7 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 **Direction:** warm editorial. Mockup screenshots live in `/design/` as visual targets (screenshot-vs-screenshot loop), but they were assembled from several Stitch directions and contain known errors — UI_NOTES §2 and §6 list every correction.
 
 - **Fonts:** display = Newsreader (serif, OFL, bundled); UI/body = Inter. Max 2 fonts
-- **Colors:** background Warm Ivory `#F7F4EE`; elevated Pure Cream `#FFFCF7`; secondary surface Soft Paper `#EEE9DF`; primary text Ink Black `#171614`; secondary Warm Gray `#777169`; muted Stone `#A7A097`; accent Burnished Gold `#A78252` (pressed `#866540`); divider Hairline Beige `#DDD6CA`; success Muted Sage `#71816C`
+- **Colors:** background Warm Ivory `#F7F4EE`; elevated Pure Cream `#FFFCF7`; secondary surface Soft Paper `#EEE9DF`; primary text Ink Black `#171614`; secondary Warm Gray `#777169`; muted Stone `#A7A097`; accent Terracotta `#A04021` (pressed `#7F3319`); divider Hairline Beige `#DDD6CA`; success Muted Sage `#71816C`
 - **Shape/space:** 8pt grid; 20pt page padding; buttons 54pt tall, 18pt radius; cards 12–18pt radius, continuous corners; sheets 28pt radius; shadows y4/blur18/6% max — prefer borders and tonal separation
 - **Texture:** 2–4% film-grain overlay; photos dominate every screen (60–80% of visual area)
 - **Copy voice:** humble bestie, lowercase-leaning, never authoritative. "our favorites ✨" not "Best Photos"; "almost made it" not "Rejected"; "ready when you are" not "Export Complete". No exclamation-point salesmanship. Never "AI optimized" / "algorithmically ranked" / "perfect photos"
