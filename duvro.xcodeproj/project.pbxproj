@@ -400,6 +400,7 @@
 				DEVELOPMENT_TEAM = A5HQBJWTL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-Additions.plist";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "duvro saves your finished dump to a duvro album so you can post it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -438,6 +439,7 @@
 				DEVELOPMENT_TEAM = A5HQBJWTL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-Additions.plist";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "duvro saves your finished dump to a duvro album so you can post it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
