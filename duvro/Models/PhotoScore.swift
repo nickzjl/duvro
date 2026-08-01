@@ -1,0 +1,99 @@
+//
+//  PhotoScore.swift
+//  duvro
+//
+//  Phase 2 scoring output, kept separate from Photo.swift (the import
+//  model) so scoring can be unit-tested with plain values and doesn't
+//  entangle the import pipeline with Vision types.
+//
+
+import Foundation
+import Vision
+
+enum PhotoCategory: String, Codable, CaseIterable, Sendable {
+    case people, place, food, detail
+}
+
+struct ClassificationLabel: Sendable, Equatable {
+    let identifier: String
+    let confidence: Float
+}
+
+struct PhotoScore: Identifiable, Sendable {
+    /// Matches the originating Photo.id.
+    let id: UUID
+
+    // MARK: - Raw Vision output (kept for the debug grid, not all used in composite yet)
+
+    /// Vision's raw ImageAestheticsScoresObservation.overallScore.
+    let rawAestheticScore: Float
+    let isUtility: Bool
+    let faceCount: Int
+    /// 0 if no faces; else the best (highest) FaceObservation.CaptureQuality.score among faces.
+    let bestFaceQuality: Float
+    /// Top N classification labels above the confidence threshold, confidence-sorted descending.
+    let classificationLabels: [ClassificationLabel]
+    let category: PhotoCategory
+    /// Stored for Phase 3 dedupe. Not consumed this phase.
+    let featurePrint: FeaturePrintObservation?
+
+    // MARK: - Recurring-person (computed and displayed only -- see item 4, not wired into composite)
+
+    var personClusterID: Int?
+    /// 0...1, always multiplied by a 0 weight in the composite for now.
+    var importantPersonBoost: Float
+
+    // MARK: - Derived
+
+    var groupBonus: Float
+    var sharpness: Float?
+    var compositeScore: Float
+
+    init(
+        id: UUID,
+        rawAestheticScore: Float,
+        isUtility: Bool,
+        faceCount: Int,
+        bestFaceQuality: Float,
+        classificationLabels: [ClassificationLabel],
+        category: PhotoCategory,
+        featurePrint: FeaturePrintObservation?,
+        personClusterID: Int? = nil,
+        importantPersonBoost: Float = 0,
+        sharpness: Float? = nil
+    ) {
+        self.id = id
+        self.rawAestheticScore = rawAestheticScore
+        self.isUtility = isUtility
+        self.faceCount = faceCount
+        self.bestFaceQuality = bestFaceQuality
+        self.classificationLabels = classificationLabels
+        self.category = category
+        self.featurePrint = featurePrint
+        self.personClusterID = personClusterID
+        self.importantPersonBoost = importantPersonBoost
+        self.groupBonus = faceCount >= 2 ? 1.0 : 0.0
+        self.sharpness = sharpness
+        self.compositeScore = CompositeScoring.compute(
+            aesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore),
+            importantPerson: importantPersonBoost,
+            faceQuality: bestFaceQuality,
+            groupBonus: faceCount >= 2 ? 1.0 : 0.0,
+            sharpness: sharpness ?? 1.0,
+            isUtility: isUtility
+        )
+    }
+
+    /// Recompute compositeScore in place -- used after the second-pass clustering
+    /// step fills in personClusterID/importantPersonBoost (still 0-weighted).
+    mutating func recomputeComposite() {
+        compositeScore = CompositeScoring.compute(
+            aesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore),
+            importantPerson: importantPersonBoost,
+            faceQuality: bestFaceQuality,
+            groupBonus: groupBonus,
+            sharpness: sharpness ?? 1.0,
+            isUtility: isUtility
+        )
+    }
+}
