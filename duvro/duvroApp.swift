@@ -11,7 +11,10 @@ import SwiftUI
 struct duvroApp: App {
     var body: some Scene {
         WindowGroup {
-            ImportView()
+            // TEMPORARY (item 14, Aug 1 2026 session): showing the Newsreader
+            // opsz comparison so it can be screenshotted. Revert to ImportView()
+            // once a cut is picked -- see FontComparisonView.swift.
+            FontComparisonView()
         }
     }
 }
