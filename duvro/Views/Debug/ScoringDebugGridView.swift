@@ -58,6 +58,7 @@ struct ScoringDebugGridView: View {
                 }
             }
         }
+        .preferredColorScheme(.light)
     }
 }
 
@@ -176,6 +177,7 @@ private struct ScoreDetailView: View {
                 }
             }
         }
+        .preferredColorScheme(.light)
     }
 
     private func row(_ label: String, _ value: String) -> some View {

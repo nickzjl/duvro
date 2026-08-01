@@ -140,6 +140,7 @@ struct ImportView: View {
                 debugScoringControls
             }
         }
+        .preferredColorScheme(.light)
     }
 
     private var debugScoringControls: some View {

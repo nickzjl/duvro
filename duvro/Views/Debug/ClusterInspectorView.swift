@@ -51,5 +51,6 @@ struct ClusterInspectorView: View {
             .navigationTitle("cluster inspector (\(clusters.count))")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .preferredColorScheme(.light)
     }
 }
