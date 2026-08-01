@@ -18,7 +18,8 @@ The mockups mix two visual languages. **Unify everything to this system:**
 - **Primary buttons:** black `#171614` fill, white text, full-radius pill, 54pt tall. (The mockups show both black pills and terracotta rectangles — **black pill wins everywhere**, including "use this vibe," which is currently terracotta.)
 - **Dividers/borders:** `#DDD6CA`, 1px
 - **Success:** Muted Sage `#71816C`
-- **Type:** display/headlines and pack names = **Newsreader** (serif); UI/body/buttons = **Inter**. Handwritten accent (Caveat) allowed for at most one helper note per screen, e.g. "7 is the sweet spot."
+- **Type:** display headlines, screen titles, and Vibe Pack **titles** (Golden Hour / Digicam / Travel Film) = **Newsreader** (serif); Vibe Pack **variant names** (sun-kissed · warm film · soft glow — these read in the terracotta accent per the Accent line above, but the font is still Inter), UI, and body = **Inter**. Handwritten accent (Caveat) allowed for at most one helper note per screen, e.g. "7 is the sweet spot."
+- **Type-size floor:** Newsreader is used at **20pt and above only**. The bundled cut is optical size 36, tuned for display use — its hairlines render thin and lose legibility below 20pt. Anything smaller is Inter, regardless of whether a mockup shows a serif there (see the handoff screen correction in §6).
 - **Case:** lowercase headlines and buttons throughout. The handoff screen currently uses sentence-case body copy ("Your curation is polished...") — convert all body copy to the same lowercase-leaning voice as the rest of the app.
 - **Texture:** 2–4% film grain overlay, app-wide.
 - **Shape:** cards 12–18pt radius, continuous corners; whisper shadows only (y4/blur18/6%).
@@ -105,5 +106,6 @@ The mockup blurs and dims the photo behind the sheet, so the user cannot see the
 - **Edit screen primary button** reads "save and continue" in the mockups — same objection as above: nothing is saved at that point (no persistence in v1; export happens only at handoff). Canonical label: **"keep this one."**
 - **Caption screen** has a large dead zone and two ghost placeholder cards at the bottom; remove them. "copy and finish" is styled as a text link — promote to the standard black pill button. Header alignment (left) differs from other screens (centered).
 - **Handoff:** body copy is sentence case while the app is lowercase; "Your curated caption" → "your caption." Photo strip still clips behind the button (safe-area inset, §2 fix 5).
+- **Handoff step titles** ("saved to duvro album" / "caption copied" / "finish in instagram") are serif at ~13pt in the mockup — below the 20pt Newsreader floor (§1). These become **Inter Medium**.
 - **Import:** copy says "select up to 200" — add the 20 minimum.
 - **Showcase:** several placeholder images contain visible browser chrome. Content will be real user photos; ignore mockup imagery entirely.

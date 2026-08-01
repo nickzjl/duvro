@@ -4,17 +4,13 @@
 <dict>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Newsreader-Regular.ttf</string>
-		<string>Newsreader-Medium.ttf</string>
-		<string>Newsreader-SemiBold.ttf</string>
-		<string>Newsreader-Italic.ttf</string>
-		<string>Inter-Regular.ttf</string>
-		<string>Inter-Medium.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
 		<string>Newsreader36pt-Regular.ttf</string>
 		<string>Newsreader36pt-Medium.ttf</string>
 		<string>Newsreader36pt-SemiBold.ttf</string>
 		<string>Newsreader36pt-Italic.ttf</string>
+		<string>Inter-Regular.ttf</string>
+		<string>Inter-Medium.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
 	</array>
 </dict>
 </plist>
