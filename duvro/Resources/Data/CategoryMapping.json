@@ -1,0 +1,28 @@
+{
+  "_comment": "Hand-tune this file freely. Keys are dump categories; values are Vision ClassifyImageRequest identifiers (the exact strings the on-device model returns -- confirmed against the real supportedIdentifiers list, not guessed). `people` is NOT listed here: it's decided by face detection, never by classification (see CategoryMapper.swift). Anything not listed below, for a photo with zero faces, falls through to `detail`. A label only counts if a photo's face count is zero AND the label is among its top classifications above the confidence threshold (see ScoringService).",
+
+  "place": [
+    "beach", "mountain", "canyon", "cave", "cliff", "desert", "forest",
+    "glacier", "hill", "island", "lake", "ocean", "river", "sky", "blue_sky",
+    "night_sky", "snow", "volcano", "waterfall", "sunset_sunrise",
+    "cityscape", "skyscraper", "building", "bridge", "street", "road",
+    "dirt_road", "railroad", "park", "garden", "farm", "vineyard", "jungle",
+    "trail", "hiking", "camping", "tent", "sand_dune", "coral_reef",
+    "castle", "monument", "museum", "stadium", "amusement_park",
+    "rollercoaster", "skatepark", "parking_lot", "pier", "dock", "pool"
+  ],
+
+  "food": [
+    "food", "meal", "dessert", "drink", "baked_goods", "baklava", "beer",
+    "birthday_cake", "bread", "white_bread", "bubble_tea", "cake",
+    "cake_regular", "cakestand", "candy", "candy_cane", "candy_other",
+    "cheese", "cheesecake", "chocolate", "chocolate_chip", "citrus_fruit",
+    "cocktail", "coffee", "coffee_bean", "cookie", "cupcake",
+    "frozen_dessert", "fruit", "fruitcake", "gingerbread", "grapefruit",
+    "grill", "grilled_chicken", "hamburger", "juice", "meat", "meatball",
+    "oatmeal", "pancake", "passionfruit", "pasta", "pizza", "radish",
+    "red_wine", "salad", "sandwich", "seafood", "soup", "sparkling_wine",
+    "starfruit", "sushi", "taco", "tea_drink", "vegetable", "wedding_cake",
+    "white_wine", "wine", "wine_bottle"
+  ]
+}
