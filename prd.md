@@ -114,7 +114,4 @@ New packs ship whenever a good idea comes — no fixed cadence. Pack architectur
 
 ## 10. Open questions
 
-1. Bundle identifier / final entity name — needed before Phase 0 (Xcode project creation).
-2. Serif face: EB Garamond vs. Newsreader — pick one for all headlines (see UI_NOTES §1).
-
-*Resolved:* sample photo set is required (P1, doubles as App Review demo). Showcase style is a staggered fade-in collage, not hard cuts (UI_NOTES §4).
+*Resolved:* sample photo set is required (P1, doubles as App Review demo). Showcase style is a staggered fade-in collage, not hard cuts (UI_NOTES §4). Bundle identifier is `app.duvro.duvro` (set at Phase 0 project creation). Serif face is **Newsreader**, used for display headlines and pack names; **Inter** is used for UI and body text (see UI_NOTES §1).

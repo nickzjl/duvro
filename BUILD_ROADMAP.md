@@ -141,7 +141,7 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 
 **Direction:** warm editorial. Mockup screenshots live in `/design/` as visual targets (screenshot-vs-screenshot loop), but they were assembled from several Stitch directions and contain known errors — UI_NOTES §2 and §6 list every correction.
 
-- **Fonts:** display = EB Garamond (or Cormorant Garamond — decide before Phase 1; both OFL, bundleable); UI/body = Inter. Max 2 fonts
+- **Fonts:** display = Newsreader (serif, OFL, bundled); UI/body = Inter. Max 2 fonts
 - **Colors:** background Warm Ivory `#F7F4EE`; elevated Pure Cream `#FFFCF7`; secondary surface Soft Paper `#EEE9DF`; primary text Ink Black `#171614`; secondary Warm Gray `#777169`; muted Stone `#A7A097`; accent Burnished Gold `#A78252` (pressed `#866540`); divider Hairline Beige `#DDD6CA`; success Muted Sage `#71816C`
 - **Shape/space:** 8pt grid; 20pt page padding; buttons 54pt tall, 18pt radius; cards 12–18pt radius, continuous corners; sheets 28pt radius; shadows y4/blur18/6% max — prefer borders and tonal separation
 - **Texture:** 2–4% film-grain overlay; photos dominate every screen (60–80% of visual area)

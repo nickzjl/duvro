@@ -8,7 +8,7 @@
 5. `/design/` — Stitch screenshots. **Visual target only. Where a mockup and the PRD/UI_NOTES conflict, the docs win.**
 
 ## Current status
-**Phase: 0 — project setup.** Update this line at the end of every session.
+**Phase 1 complete — Phase 2 next.** Update this line at the end of every session.
 
 ## What duvro is
 An iOS app that turns a camera roll into a ready-to-post Instagram photo dump. The user imports 20–200 photos, picks a Vibe Pack, and duvro curates a set, renders each photo in 3 aesthetic variants for the user to choose between, then hands off to Instagram with the photos saved in order and the caption on the clipboard.

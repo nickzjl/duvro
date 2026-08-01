@@ -17,7 +17,7 @@ The mockups mix two visual languages. **Unify everything to this system:**
 - **Accent:** terracotta `#A04021` — used ONLY for: selected states, the handwritten-style helper notes, and pack variant names. Never for primary buttons.
 - **Primary buttons:** black `#171614` fill, white text, full-radius pill, 54pt tall. (The mockups show both black pills and terracotta rectangles — **black pill wins everywhere**, including "use this vibe," which is currently terracotta.)
 - **Dividers/borders:** `#DDD6CA`, 1px
-- **Type:** display/headlines = serif (EB Garamond or Newsreader — pick one and use it for every headline); UI/body/buttons = Inter. Handwritten accent (Caveat) allowed for at most one helper note per screen, e.g. "7 is the sweet spot."
+- **Type:** display/headlines and pack names = **Newsreader** (serif); UI/body/buttons = **Inter**. Handwritten accent (Caveat) allowed for at most one helper note per screen, e.g. "7 is the sweet spot."
 - **Case:** lowercase headlines and buttons throughout. The handoff screen currently uses sentence-case body copy ("Your curation is polished...") — convert all body copy to the same lowercase-leaning voice as the rest of the app.
 - **Texture:** 2–4% film grain overlay, app-wide.
 - **Shape:** cards 12–18pt radius, continuous corners; whisper shadows only (y4/blur18/6%).
