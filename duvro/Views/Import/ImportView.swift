@@ -9,6 +9,12 @@ struct ImportView: View {
     @State private var importService = PhotoImportService()
     @State private var isPickerPresented = false
 
+    #if DEBUG
+    @State private var scoringService = ScoringService()
+    @State private var showScoringGrid = false
+    @State private var showClusterInspector = false
+    #endif
+
     private let minimumPhotos = 20
     private let maximumPhotos = 200
 
@@ -35,6 +41,14 @@ struct ImportView: View {
             }
             .ignoresSafeArea()
         }
+        #if DEBUG
+        .sheet(isPresented: $showScoringGrid) {
+            ScoringDebugGridView(photos: importService.photos, scores: scoringService.scores)
+        }
+        .sheet(isPresented: $showClusterInspector) {
+            ClusterInspectorView(clusters: scoringService.personClusters)
+        }
+        #endif
     }
 
     private var emptyState: some View {
@@ -109,17 +123,52 @@ struct ImportView: View {
 
     #if DEBUG
     private var debugOverlay: some View {
-        HStack {
+        VStack {
+            HStack {
+                Spacer()
+                Text(String(format: "peak %.0fMB · %d/%d", importService.peakMemoryMB, importService.photos.count, importService.totalCount))
+                    .font(.system(size: 11, design: .monospaced))
+                    .padding(6)
+                    .background(.black.opacity(0.7))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .padding(.top, 8)
+                    .padding(.trailing, 8)
+            }
             Spacer()
-            Text(String(format: "peak %.0fMB · %d/%d", importService.peakMemoryMB, importService.photos.count, importService.totalCount))
-                .font(.system(size: 11, design: .monospaced))
-                .padding(6)
-                .background(.black.opacity(0.7))
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .padding(.top, 8)
-                .padding(.trailing, 8)
+            if !importService.photos.isEmpty {
+                debugScoringControls
+            }
         }
+    }
+
+    private var debugScoringControls: some View {
+        VStack(spacing: 8) {
+            if scoringService.isScoring {
+                Text(String(format: "scoring %d/%d · peak %.0fMB", scoringService.scoredCount, scoringService.totalCount, scoringService.peakMemoryMB))
+                    .font(.system(size: 11, design: .monospaced))
+            } else if !scoringService.scores.isEmpty {
+                Text(String(format: "scored %d in %.2fs · peak %.0fMB", scoringService.scores.count, scoringService.elapsedSeconds, scoringService.peakMemoryMB))
+                    .font(.system(size: 11, design: .monospaced))
+            }
+            HStack(spacing: 8) {
+                Button(scoringService.isScoring ? "scoring…" : "score photos") {
+                    Task { await scoringService.score(photos: importService.photos) }
+                }
+                .disabled(scoringService.isScoring)
+
+                if !scoringService.scores.isEmpty {
+                    Button("grid") { showScoringGrid = true }
+                    Button("clusters") { showClusterInspector = true }
+                }
+            }
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+        }
+        .padding(10)
+        .background(.black.opacity(0.8))
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.bottom, 12)
     }
     #endif
 }

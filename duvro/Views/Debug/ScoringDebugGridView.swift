@@ -1,0 +1,189 @@
+//
+//  ScoringDebugGridView.swift
+//  duvro
+//
+//  DEBUG-only tuning instrument for Phase 2 (BUILD_ROADMAP: "this is the
+//  tuning tool -- build it well"). Not part of the product UI flow.
+//  Shows every photo with every sub-score, the composite, category,
+//  utility flag, and cluster ID; sortable; tap to enlarge.
+//
+
+import SwiftUI
+
+struct ScoringDebugGridView: View {
+    let photos: [Photo]
+    let scores: [PhotoScore]
+
+    @State private var sortDescending = true
+    @State private var enlarged: PhotoScore?
+
+    private var photosByID: [UUID: Photo] {
+        Dictionary(uniqueKeysWithValues: photos.map { ($0.id, $0) })
+    }
+
+    private var sortedScores: [PhotoScore] {
+        scores.sorted {
+            sortDescending ? $0.compositeScore > $1.compositeScore : $0.compositeScore < $1.compositeScore
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], spacing: 8) {
+                    ForEach(sortedScores) { score in
+                        if let photo = photosByID[score.id] {
+                            ScoreCard(photo: photo, score: score)
+                                .onTapGesture { enlarged = score }
+                        }
+                    }
+                }
+                .padding(12)
+            }
+            .background(Color(hex: "F7F4EE"))
+            .navigationTitle("scoring debug (\(scores.count))")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        sortDescending.toggle()
+                    } label: {
+                        Label("sort", systemImage: sortDescending ? "arrow.down" : "arrow.up")
+                    }
+                }
+            }
+            .sheet(item: $enlarged) { score in
+                if let photo = photosByID[score.id] {
+                    ScoreDetailView(photo: photo, score: score)
+                }
+            }
+        }
+    }
+}
+
+private struct ScoreCard: View {
+    let photo: Photo
+    let score: PhotoScore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                Image(uiImage: photo.thumbnail)
+                    .resizable()
+                    .aspectRatio(4 / 5, contentMode: .fill)
+                    .frame(height: 130)
+                    .clipped()
+
+                if score.isUtility {
+                    Text("UTILITY")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .padding(3)
+                        .background(.red.opacity(0.85))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            Text(String(format: "%.3f", score.compositeScore))
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+
+            HStack(spacing: 4) {
+                categoryBadge
+                if let clusterID = score.personClusterID {
+                    Text("C\(clusterID)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color(hex: "A04021").opacity(0.15))
+                        .foregroundStyle(Color(hex: "A04021"))
+                        .clipShape(Capsule())
+                }
+            }
+
+            Group {
+                Text("aes \(String(format: "%.2f", score.rawAestheticScore))")
+                Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))")
+                Text("grp \(String(format: "%.1f", score.groupBonus))  imp \(String(format: "%.2f", score.importantPersonBoost))")
+                if let sharpness = score.sharpness {
+                    Text("sharp \(String(format: "%.2f", sharpness))")
+                }
+            }
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(Color(hex: "777169"))
+        }
+        .padding(6)
+        .background(Color(hex: "FFFCF7"))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var categoryBadge: some View {
+        Text(score.category.rawValue)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Color(hex: "171614"))
+            .foregroundStyle(.white)
+            .clipShape(Capsule())
+    }
+}
+
+private struct ScoreDetailView: View {
+    let photo: Photo
+    let score: PhotoScore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Image(uiImage: photo.thumbnail)
+                        .resizable()
+                        .aspectRatio(4 / 5, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        row("composite", String(format: "%.4f", score.compositeScore))
+                        row("category", score.category.rawValue)
+                        row("utility", score.isUtility ? "YES (hard reject)" : "no")
+                        row("raw aesthetic", String(format: "%.4f", score.rawAestheticScore))
+                        row("normalized aesthetic", String(format: "%.4f", CompositeScoring.normalizeAesthetic(score.rawAestheticScore)))
+                        row("face count", "\(score.faceCount)")
+                        row("best face quality", String(format: "%.4f", score.bestFaceQuality))
+                        row("group bonus", String(format: "%.2f", score.groupBonus))
+                        row("important-person boost", "\(String(format: "%.4f", score.importantPersonBoost)) (weight 0 -- see item 4)")
+                        row("cluster ID", score.personClusterID.map(String.init) ?? "none")
+                        row("sharpness", score.sharpness.map { String(format: "%.4f", $0) } ?? "not computed")
+                    }
+                    .font(.system(size: 13, design: .monospaced))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("classification labels")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        ForEach(score.classificationLabels, id: \.identifier) { label in
+                            Text("\(label.identifier)  \(String(format: "%.3f", label.confidence))")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Color(hex: "777169"))
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(hex: "F7F4EE"))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(Color(hex: "777169"))
+            Spacer()
+            Text(value)
+        }
+    }
+}
