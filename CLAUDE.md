@@ -8,7 +8,7 @@
 5. `/design/` — Stitch screenshots. **Visual target only. Where a mockup and the PRD/UI_NOTES conflict, the docs win.**
 
 ## Current status
-**Phase 2 in progress.** Scoring engine, category mapping, and composite score are built; recurring-person clustering was tried and removed (design-level dead end, not a bug — see git history). Physical-device acceptance pass (100 photos ≤15s, 200-photo memory <400MB) still pending user confirmation. Do not start Phase 3 until that passes. Update this line at the end of every session.
+**Phase 2 complete — Phase 3 next.** Verified on physical device: 100 photos scored in 2.24s (limit 15s); 200-photo peak memory 167MB import / 155MB scoring (limit 400MB); debug-grid composites match the renormalized formula against pre-change baselines; screenshots still flagged. Known issue carried into next session, not a Phase 2 regression: screenshots categorize as `people` (label-mapper bug). Update this line at the end of every session.
 
 ## What duvro is
 An iOS app that turns a camera roll into a ready-to-post Instagram photo dump. The user imports 20–200 photos, picks a Vibe Pack, and duvro curates a set, renders each photo in 3 aesthetic variants for the user to choose between, then hands off to Instagram with the photos saved in order and the caption on the clipboard.
