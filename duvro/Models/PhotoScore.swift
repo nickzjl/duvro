@@ -44,7 +44,6 @@ struct PhotoScore: Identifiable, Sendable {
     // MARK: - Derived
 
     let groupBonus: Float
-    var sharpness: Float?
     let compositeScore: Float
 
     /// isUtility alone false-positives on ordinary photos that share visual
@@ -66,8 +65,7 @@ struct PhotoScore: Identifiable, Sendable {
         humanCount: Int = 0,
         classificationLabels: [ClassificationLabel],
         category: PhotoCategory,
-        featurePrint: FeaturePrintObservation?,
-        sharpness: Float? = nil
+        featurePrint: FeaturePrintObservation?
     ) {
         self.id = id
         self.rawAestheticScore = rawAestheticScore
@@ -79,12 +77,10 @@ struct PhotoScore: Identifiable, Sendable {
         self.category = category
         self.featurePrint = featurePrint
         self.groupBonus = faceCount >= 2 ? 1.0 : 0.0
-        self.sharpness = sharpness
         self.compositeScore = CompositeScoring.compute(
             aesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore),
             faceQuality: bestFaceQuality,
             groupBonus: faceCount >= 2 ? 1.0 : 0.0,
-            sharpness: sharpness ?? 1.0,
             isUtility: isUtility
         )
     }

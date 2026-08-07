@@ -5,16 +5,31 @@
 //  Pure, testable composite-score math. No Vision imports, no I/O -- kept
 //  this way specifically so unit tests can exercise it with plain values.
 //
-//  BUILD_ROADMAP Phase 2's original starting weights included a fifth
-//  term, a 0.25-weighted boost for photos containing a recurring person
-//  across the session. That term has been removed entirely: the detection
-//  mechanism behind it was a design-level dead end (a general Vision
-//  feature print encodes lighting/framing, not identity), not a tuning
-//  problem, so there's no weight to hold a place for. See git history for
-//  the removed implementation. The remaining four weights are
-//  RENORMALIZED to sum to 1.0 (divided by 0.75, the sum of the other
-//  four) rather than left with a 0.25 gap, so composite scores read
-//  sensibly on the debug grid.
+//  BUILD_ROADMAP Phase 2's original starting weights were 0.4 aesthetic +
+//  0.25 (a boost for photos containing a recurring person across the
+//  session) + 0.2 faceQuality + 0.1 groupBonus + 0.05 sharpness.
+//
+//  The recurring-person term is gone entirely: the detection mechanism
+//  behind it was a design-level dead end (a general Vision feature print
+//  encodes lighting/framing, not identity), not a tuning problem, so
+//  there's no weight to hold a place for. See git history for the removed
+//  implementation.
+//
+//  sharpness is also gone: it was never computed (no Laplacian-variance
+//  check was built), so it silently defaulted to 1.0 and contributed a
+//  flat, uniform amount to every photo's composite regardless of actual
+//  sharpness -- bookkeeping noise, not a real signal. A real sharpness
+//  term can be added later (Laplacian variance via vImage, per
+//  BUILD_ROADMAP Phase 2) if the aesthetic score proves insufficient at
+//  catching blur on its own; nothing here rules that out.
+//
+//  The three remaining weights (aesthetic/faceQuality/groupBonus) are
+//  RENORMALIZED to sum to 1.0 using their ORIGINAL relative proportions
+//  (0.4 : 0.2 : 0.1, i.e. divided by 0.7, the sum of those three) --
+//  their relative weighting against each other is unchanged, only the
+//  absolute scale shifts. This is a monotone affine transform: relative
+//  rankings are identical to before; only the absolute composite values
+//  rise.
 //
 //  isUtility ALONE over-fires on ordinary photos (observed on-device: a
 //  gym-bench photo and a laptop-on-desk photo were both flagged, despite
@@ -29,12 +44,12 @@
 import Foundation
 
 enum CompositeScoring {
-    private static let renormalizationFactor: Float = 1.0 / 0.75
+    /// Sum of the three surviving original weights (0.4 + 0.2 + 0.1).
+    private static let renormalizationFactor: Float = 1.0 / 0.7
 
     static let aestheticWeight: Float = 0.4 * renormalizationFactor
     static let faceQualityWeight: Float = 0.2 * renormalizationFactor
     static let groupBonusWeight: Float = 0.1 * renormalizationFactor
-    static let sharpnessWeight: Float = 0.05 * renormalizationFactor
 
     /// Normalized (0...1) aesthetic ceiling below which an isUtility flag is
     /// trusted enough to hard-reject. Starting point pending tuning: the
@@ -57,7 +72,6 @@ enum CompositeScoring {
         aesthetic: Float,
         faceQuality: Float,
         groupBonus: Float,
-        sharpness: Float,
         isUtility: Bool
     ) -> Float {
         let normalizedAesthetic = aesthetic.clamped(to: 0...1)
@@ -65,7 +79,6 @@ enum CompositeScoring {
         let score = aestheticWeight * normalizedAesthetic
             + faceQualityWeight * faceQuality.clamped(to: 0...1)
             + groupBonusWeight * groupBonus.clamped(to: 0...1)
-            + sharpnessWeight * sharpness.clamped(to: 0...1)
         return score.clamped(to: 0...1)
     }
 }

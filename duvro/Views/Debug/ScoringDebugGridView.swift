@@ -133,9 +133,6 @@ private struct ScoreCard: View {
                 Text("aes \(String(format: "%.2f", score.rawAestheticScore))")
                 Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))  hum \(score.humanCount)")
                 Text("grp \(String(format: "%.1f", score.groupBonus))")
-                if let sharpness = score.sharpness {
-                    Text("sharp \(String(format: "%.2f", sharpness))")
-                }
             }
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(Color(hex: "777169"))
@@ -181,7 +178,6 @@ private struct ScoreDetailView: View {
                         row("best face quality", String(format: "%.4f", score.bestFaceQuality))
                         row("human count (body detection)", "\(score.humanCount)")
                         row("group bonus", String(format: "%.2f", score.groupBonus))
-                        row("sharpness", score.sharpness.map { String(format: "%.4f", $0) } ?? "not computed")
                     }
                     .font(.system(size: 13, design: .monospaced))
 
