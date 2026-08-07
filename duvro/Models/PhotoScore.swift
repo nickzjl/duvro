@@ -66,7 +66,11 @@ struct PhotoScore: Identifiable, Sendable {
     /// rejected and why. Not re-derived here.
     let rejectionReason: CompositeScoring.RejectionReason?
 
-    var isHardRejected: Bool { rejectionReason != nil }
+    /// nonisolated: pure computation over an already-captured immutable
+    /// value, called from ShortlistService's nonisolated clustering/shortlist
+    /// pass (SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor otherwise isolates
+    /// this by default -- same pattern as CompositeScoring, see that file).
+    nonisolated var isHardRejected: Bool { rejectionReason != nil }
 
     // MARK: - Derived
 

@@ -12,6 +12,8 @@ struct ImportView: View {
     #if DEBUG
     @State private var scoringService = ScoringService()
     @State private var showScoringGrid = false
+    @State private var shortlistResult: ShortlistResult?
+    @State private var showShortlistDebug = false
     #endif
 
     private let minimumPhotos = 20
@@ -55,6 +57,11 @@ struct ImportView: View {
             // something's wrong, and shouldn't be hidden behind a manual tap.
             if wasScoring && !isScoringNow {
                 showScoringGrid = true
+            }
+        }
+        .sheet(isPresented: $showShortlistDebug) {
+            if let shortlistResult {
+                ShortlistDebugView(photos: importService.photos, result: shortlistResult)
             }
         }
         #endif
@@ -173,6 +180,13 @@ struct ImportView: View {
 
                 if !scoringService.scores.isEmpty || scoringService.failedCount > 0 {
                     Button("grid") { showScoringGrid = true }
+                }
+
+                if !scoringService.scores.isEmpty {
+                    Button("shortlist") {
+                        shortlistResult = ShortlistService.buildShortlist(from: scoringService.scores)
+                        showShortlistDebug = true
+                    }
                 }
             }
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
