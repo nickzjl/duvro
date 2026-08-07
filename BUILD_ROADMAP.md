@@ -62,7 +62,7 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
 
 ### Phase 2 — Scoring engine
 - [ ] `ScoringService`, concurrent (TaskGroup, max ~4 in flight):
-  - [ ] `VNCalculateImageAestheticsScoresRequest` → `overallScore` and `isUtility` (screenshots/receipts → hard reject)
+  - [ ] `VNCalculateImageAestheticsScoresRequest` → `overallScore` and `isUtility`. Reject decision (see `CompositeScoring.swift`) is (a) `VNClassifyImageRequest` label `screenshot` ≥ 0.5 confidence, OR (b) `isUtility` AND normalized aesthetic below a floor — `isUtility` alone proved unreliable on real photos (fires on plated food and gym-bench shots as readily as receipts), so it only rejects paired with a low aesthetic score
   - [ ] `VNGenerateImageFeaturePrintRequest` → feature print per photo (similarity)
   - [ ] `VNDetectFaceRectanglesRequest` + `VNDetectFaceCaptureQualityRequest` → face count + best face quality
   - [ ] **Group-shot boost (the best-friend fix, identity-free):** 2+ faces → bonus. A general Vision feature print encodes lighting/framing/composition, not identity — recurring-person detection via face-crop clustering was tried and removed (design-level dead end, not a bug; see git history). Group-shot weighting carries the emotional-signal intent without needing to recognize *who* is in the photo

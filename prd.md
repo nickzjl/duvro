@@ -17,7 +17,7 @@ Upload your camera roll from a trip or a weekend, tell duvro your vibe, and it p
 
 **The real competitive risk is platform absorption, not indie apps.** Apple (Photos) or Instagram could ship "AI select best photos" as a native feature at any time. AI selection is therefore the hook, not the moat. **The moat is taste:** opinionated, named, trend-riding Vibe Packs that make people want *these specific edits* — the one thing a serve-everyone platform structurally won't build. Selection gets the install; taste keeps the user.
 
-**Core quality bar:** the app must make users feel "these are exactly the photos I would've picked, only better." Humans select for emotion (best friend, the 2am moment), not technical quality — so curation must weight emotional signals (recurring people, groups) alongside aesthetics, and a dump must have compositional variety (people + place + food + detail), never 7 homogeneous "best" shots.
+**Core quality bar:** the app must make users feel "these are exactly the photos I would've picked, only better." Humans select for emotion (best friend, the 2am moment), not technical quality — so curation must weight emotional signals alongside aesthetics. Recurring-person identity isn't available on-device, so this happens in two places: on-device, group-shot weighting (a photo with more than one person reads as more meaningful than a solo shot); at the model stage, the Stage 2 call infers visually who matters most across the set. A dump must also have compositional variety (people + place + food + detail), never 7 homogeneous "best" shots.
 
 **Business model:** 100% free in v1.
 
@@ -60,7 +60,7 @@ Both personas: iPhone users, personal (not Creator/Business) Instagram accounts.
 | P0.11 | Vibe Pack preview sheet | Tapping a pack card opens it; ~5 bundled sample images in that pack's look (own/licensed photos only, for copyright/App Review reasons); its "use this vibe" button selects the pack AND starts curation |
 
 ### P1 — ship if time allows
-- Caption generation (single Claude API call with photo thumbnails; ONE editable suggestion + regenerate, not three — the only server-dependent feature; degrade gracefully to templates if offline)
+- Caption generation (single Claude API call with photo thumbnails; ONE editable suggestion + regenerate, not three — shares the curation call's Vercel endpoint, not a separate server (§8); degrade gracefully to templates if offline)
 - Share-to-TikTok export (same photos, 9:16 padded)
 - Onboarding: 15-second demo with bundled sample photos (also doubles as App Review demo)
 
@@ -70,7 +70,7 @@ Both personas: iPhone users, personal (not Creator/Business) Instagram accounts.
 - Instagram Stories SDK integration
 - Video support
 - Android / web
-- Accounts, cloud sync, backend (beyond the caption endpoint)
+- Accounts, cloud sync, backend (beyond the shared curation + caption endpoint, §8)
 - Scheduling, auto-posting
 - Monetization
 
@@ -108,7 +108,7 @@ New packs ship whenever a good idea comes — no fixed cadence. Pack architectur
 |---|---|
 | Apple or Instagram ships native "AI select best photos" | Moat is taste, not selection: opinionated Vibe Packs, pack brand names, trend speed. Selection is the hook, packs are the retention |
 | AI misses an emotionally important photo (the "best friend" problem) | Group boosts; composition variety; "skip this photo" during edits; "what we left out" row at final review; humble "our favorites" framing |
-| Selection quality below the "better taste than me" bar | Concrete test: testers hand-pick 7 from their own 100 photos → AI picks must heavily overlap or be rated equal/better. Gate at Phase 3 and TestFlight |
+| Selection quality below the "better taste than me" bar | Concrete test: testers hand-pick 7 from their own 100 photos → AI picks must heavily overlap or be rated equal/better. Gate at Phase 3 + 3.5 and TestFlight |
 | Showcase-then-edit flow hides a bad selection until late | The final review screen is the safety net: full preview, remove, and runner-up swaps before anything is final |
 | Edits look mid → no differentiation | Timebox dedicated days purely on filter tuning against reference photos; test with target-persona users on TestFlight |
 | IG handoff friction feels like a broken promise | Posting instructions on the handoff screen; copy everywhere says "prepped, not posted" |
