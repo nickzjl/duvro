@@ -36,4 +36,4 @@ An iOS app that turns a camera roll into a ready-to-post Instagram photo dump. T
 - When a mockup detail and a doc conflict, follow the doc and say so rather than silently picking one.
 
 ## Hard gate
-Phase 3 contains the **overlap test**: real users hand-pick 7 photos from their own ~100, and duvro's picks must overlap ≥4/7 or be rated equal/better. If it fails, stop and re-tune scoring before building anything downstream. Nothing else in the app matters if selection is bad.
+The **overlap test** governs everything downstream: real users hand-pick 7 photos from their own ~100, and duvro's picks must overlap ≥4/7 or be rated equal/better. The on-device shortlist (Phase 3) alone doesn't produce a post, so this tests the full pipeline — Phase 3's shortlist plus Phase 3.5's curation call — and is only executable once Phase 3.5 exists (see BUILD_ROADMAP Phase 3.5). If it fails, stop and re-tune — shortlist thresholds, the curation prompt, or both — before building anything downstream. Nothing else in the app matters if selection is bad.
