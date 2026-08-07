@@ -103,9 +103,10 @@ private struct ScoreCard: View {
                     .frame(height: 130)
                     .clipped()
 
-                if score.isHardRejected {
-                    Text("REJECTED")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                if let reason = score.rejectionReason {
+                    Text("REJECTED\n\(reason.displayDescription)")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .multilineTextAlignment(.trailing)
                         .padding(3)
                         .background(.red.opacity(0.85))
                         .foregroundStyle(.white)
@@ -171,13 +172,14 @@ private struct ScoreDetailView: View {
                         row("composite", String(format: "%.4f", score.compositeScore))
                         row("category", score.category.rawValue)
                         row("isUtility (raw Vision flag)", score.isUtility ? "yes" : "no")
-                        row("hard rejected", score.isHardRejected ? "YES -- isUtility AND aesthetic < \(CompositeScoring.utilityAestheticGate)" : score.isUtility ? "no -- utility flag present but aesthetic not low enough" : "no")
+                        row("hard rejected", score.rejectionReason?.displayDescription ?? "no")
                         row("raw aesthetic", String(format: "%.4f", score.rawAestheticScore))
                         row("normalized aesthetic", String(format: "%.4f", CompositeScoring.normalizeAesthetic(score.rawAestheticScore)))
-                        row("face count", "\(score.faceCount)")
-                        row("best face quality", String(format: "%.4f", score.bestFaceQuality))
-                        row("human count (body detection)", "\(score.humanCount)")
+                        row("face count", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : "\(score.faceCount)")
+                        row("best face quality", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : String(format: "%.4f", score.bestFaceQuality))
+                        row("human count (body detection)", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : "\(score.humanCount)")
                         row("group bonus", String(format: "%.2f", score.groupBonus))
+                        row("feature print", score.isHardRejected ? "nil (Stage 2 skipped -- rejected)" : (score.featurePrint != nil ? "present" : "nil"))
                     }
                     .font(.system(size: 13, design: .monospaced))
 

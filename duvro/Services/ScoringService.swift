@@ -4,6 +4,9 @@
 //
 //  Phase 2: scores and categorizes photos. Produces scores and categories
 //  ONLY -- no curation/selection/rejection-pass logic here, that's Phase 3.
+//  (Hard-reject at the individual-photo level, per CompositeScoring's
+//  rejectionReason, is Phase 2's job -- it's Vision's own output disqualifying
+//  a photo, not a cross-photo selection decision.)
 //
 //  Vision API choice: the new Swift-native async API introduced in iOS 18
 //  (ImageRequestHandler + {Calculate,Detect,Generate,Classify}...Request,
@@ -30,6 +33,16 @@
 //  same-person and different-person distances overlapping completely.
 //  Vision exposes no public face-recognition API. See git history
 //  (pre-removal) if this is ever revisited with a different approach.
+//
+//  PER-PHOTO PIPELINE is two stages with a gate between them:
+//    Stage 1: aesthetics + classification
+//    GATE:    CompositeScoring.rejectionReason(...) -- if non-nil, return early
+//    Stage 2: face rectangles, face capture quality, human rectangles,
+//             whole-image feature print
+//  A rejected photo's Stage 2 requests are never created, let alone awaited --
+//  this is Vision nominating candidates cheaply before spending the more
+//  expensive per-photo work on faces/bodies/features. See scorePhoto below.
+//
 
 import Foundation
 import Vision
@@ -130,7 +143,8 @@ final class ScoringService {
                 humanCount: raw.humanCount,
                 classificationLabels: raw.classificationLabels,
                 category: category,
-                featurePrint: raw.featurePrint
+                featurePrint: raw.featurePrint,
+                rejectionReason: raw.rejectionReason
             )
             assembled.append(score)
         }
@@ -141,7 +155,8 @@ final class ScoringService {
         elapsedSeconds = Date().timeIntervalSince(startTime)
         isScoring = false
 
-        print("[scoring] \(assembled.count)/\(photos.count) scored, \(failedCount) failed, in \(String(format: "%.2f", elapsedSeconds))s, peak resident memory \(String(format: "%.1f", peakMemoryMB)) MB")
+        let rejectedCount = assembled.count { $0.isHardRejected }
+        print("[scoring] \(assembled.count)/\(photos.count) scored (\(rejectedCount) rejected), \(failedCount) failed, in \(String(format: "%.2f", elapsedSeconds))s, peak resident memory \(String(format: "%.1f", peakMemoryMB)) MB")
         if !failureReasons.isEmpty {
             print("[scoring] failure reasons: \(failureReasons)")
         }
@@ -157,6 +172,7 @@ final class ScoringService {
         let humanCount: Int
         let classificationLabels: [ClassificationLabel]
         let featurePrint: FeaturePrintObservation?
+        let rejectionReason: CompositeScoring.RejectionReason?
     }
 
     private enum ScoreOutcome: Sendable {
@@ -168,16 +184,56 @@ final class ScoringService {
         do {
             let handler = ImageRequestHandler(photo.downsampledURL)
 
+            // MARK: Stage 1 -- aesthetics + classification only.
             async let aestheticsResult = handler.perform(CalculateImageAestheticsScoresRequest())
-            async let featurePrintResult = handler.perform(GenerateImageFeaturePrintRequest())
-            async let faceRectResult = handler.perform(DetectFaceRectanglesRequest())
             async let classifyResult = handler.perform(ClassifyImageRequest())
-            async let humanRectResult = handler.perform(DetectHumanRectanglesRequest())
 
             let aesthetics = try await aestheticsResult
+            let classifications = try await classifyResult
+
+            let topLabels = classifications
+                .filter { $0.confidence >= classificationConfidenceThreshold }
+                .sorted { $0.confidence > $1.confidence }
+                .prefix(classificationTopN)
+                .map { ClassificationLabel(identifier: $0.identifier, confidence: $0.confidence) }
+            let labels = Array(topLabels)
+
+            // MARK: GATE.
+            let normalizedAesthetic = CompositeScoring.normalizeAesthetic(aesthetics.overallScore)
+            let rejection = CompositeScoring.rejectionReason(
+                isUtility: aesthetics.isUtility,
+                normalizedAesthetic: normalizedAesthetic,
+                labels: labels
+            )
+
+            if let rejection {
+                // Early return: Stage 2's requests are never created here, not
+                // computed and discarded. No face/human/feature-print Vision
+                // call happens for a rejected photo.
+                #if DEBUG
+                print("[scoring-debug] \(photo.id) REJECTED (\(rejection.displayDescription)) aesthetic=\(aesthetics.overallScore) isUtility=\(aesthetics.isUtility)")
+                #endif
+                return .success(RawPhotoScore(
+                    photoID: photo.id,
+                    rawAestheticScore: aesthetics.overallScore,
+                    isUtility: aesthetics.isUtility,
+                    faceObservations: [],
+                    humanCount: 0,
+                    classificationLabels: labels,
+                    featurePrint: nil,
+                    rejectionReason: rejection
+                ))
+            }
+
+            // MARK: Stage 2 -- face rectangles, face capture quality, human
+            // rectangles, whole-image feature print. Only reached when Stage 1
+            // did not reject the photo.
+            async let featurePrintResult = handler.perform(GenerateImageFeaturePrintRequest())
+            async let faceRectResult = handler.perform(DetectFaceRectanglesRequest())
+            async let humanRectResult = handler.perform(DetectHumanRectanglesRequest())
+
             let featurePrint = try await featurePrintResult
             var faces = try await faceRectResult
-            let classifications = try await classifyResult
             let humans = try await humanRectResult
 
             if !faces.isEmpty {
@@ -186,20 +242,15 @@ final class ScoringService {
                 faces = try await handler.perform(qualityRequest)
             }
 
-            let topLabels = classifications
-                .filter { $0.confidence >= classificationConfidenceThreshold }
-                .sorted { $0.confidence > $1.confidence }
-                .prefix(classificationTopN)
-                .map { ClassificationLabel(identifier: $0.identifier, confidence: $0.confidence) }
-
             let result = RawPhotoScore(
                 photoID: photo.id,
                 rawAestheticScore: aesthetics.overallScore,
                 isUtility: aesthetics.isUtility,
                 faceObservations: faces,
                 humanCount: humans.count,
-                classificationLabels: Array(topLabels),
-                featurePrint: featurePrint
+                classificationLabels: labels,
+                featurePrint: featurePrint,
+                rejectionReason: nil
             )
             #if DEBUG
             let labelDump = result.classificationLabels.map { "\($0.identifier):\(String(format: "%.2f", $0.confidence))" }.joined(separator: ", ")
