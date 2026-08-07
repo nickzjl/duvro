@@ -8,14 +8,14 @@
 5. `/design/` — Stitch screenshots. **Visual target only. Where a mockup and the PRD/UI_NOTES conflict, the docs win.**
 
 ## Current status
-**Phase 1 complete — Phase 2 next.** Update this line at the end of every session.
+**Phase 2 in progress.** Scoring engine, category mapping, and composite score are built; recurring-person clustering was tried and removed (design-level dead end, not a bug — see git history). Physical-device acceptance pass (100 photos ≤15s, 200-photo memory <400MB) still pending user confirmation. Do not start Phase 3 until that passes. Update this line at the end of every session.
 
 ## What duvro is
 An iOS app that turns a camera roll into a ready-to-post Instagram photo dump. The user imports 20–200 photos, picks a Vibe Pack, and duvro curates a set, renders each photo in 3 aesthetic variants for the user to choose between, then hands off to Instagram with the photos saved in order and the caption on the clipboard.
 
 ## Product thesis (governs judgment calls)
 1. **Taste is the moat; selection is the hook.** Apple/Instagram could ship "AI pick my best photos" tomorrow — they'll never ship opinionated Pinterest-girl aesthetics. Vibe Packs get the most polish time.
-2. **Humans pick for emotion, vision models pick for quality.** A blurry photo with the user's best friend beats a perfect sunset. Weight recurring people and groups; enforce variety (people/place/food/detail).
+2. **Humans pick for emotion, vision models pick for quality.** A blurry photo with the user's best friend beats a perfect sunset. Weight group shots; enforce variety (people/place/food/detail).
 3. **Momentum over judgment.** Never give the user a screen whose only purpose is to evaluate the AI. Corrections happen late, after they're invested.
 4. **Humility in copy.** "our favorites" — never "the best photos." "almost made it" — never "rejected."
 5. **The bar:** users should feel "these are exactly the photos I would've picked, only better."

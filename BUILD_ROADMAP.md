@@ -65,11 +65,10 @@ State: one `@Observable` `SessionStore` owning the flow (photos → scores → s
   - [ ] `VNCalculateImageAestheticsScoresRequest` → `overallScore` and `isUtility` (screenshots/receipts → hard reject)
   - [ ] `VNGenerateImageFeaturePrintRequest` → feature print per photo (similarity)
   - [ ] `VNDetectFaceRectanglesRequest` + `VNDetectFaceCaptureQualityRequest` → face count + best face quality
-  - [ ] **Recurring-person detection (the best-friend fix):** crop faces → feature-print the crops → cluster across the session; photos containing a person from a large cluster get an "important person" boost. No identity, no names, on-device, discarded after session
-  - [ ] **Group-shot boost:** 2+ faces → bonus
+  - [ ] **Group-shot boost (the best-friend fix, identity-free):** 2+ faces → bonus. A general Vision feature print encodes lighting/framing/composition, not identity — recurring-person detection via face-crop clustering was tried and removed (design-level dead end, not a bug; see git history). Group-shot weighting carries the emotional-signal intent without needing to recognize *who* is in the photo
   - [ ] `VNClassifyImageRequest` → map labels to dump categories: `people` / `place` / `food` / `detail`
   - [ ] Blur check only if aesthetics score proves insufficient (Laplacian variance via vImage)
-- [ ] Composite score (starting point, debug grid decides): `0.4*aesthetic + 0.25*importantPerson + 0.2*faceQuality + 0.1*groupBonus + 0.05*sharpness`; utility → reject
+- [ ] Composite score (starting point, debug grid decides): `0.5714*aesthetic + 0.2857*faceQuality + 0.1429*groupBonus` (i.e. 4/7, 2/7, 1/7 -- the original 0.4/0.2/0.1 proportions renormalized after dropping importantPerson and sharpness, see CompositeScoring.swift); utility → reject
 - [ ] DEBUG-only grid overlay showing every photo's scores + category (this is the tuning tool — build it well)
 - **Accept:** 100 photos scored in ≤15s on a real iPhone; screenshots flagged; scores eyeball-correct on the debug grid.
 

@@ -35,7 +35,7 @@ Both personas: iPhone users, personal (not Creator/Business) Instagram accounts.
 2. **Import** — user selects 20–200 photos (native photo picker).
 3. **Select vibe** — photo count is a **text input field** (numeric keypad) with helper text "7 is the sweet spot"; values below 4 or above 20 trigger a gentle message (4 is the floor — composition variety, people/place/food/detail, can't resolve below that; 20 is the max — that's Instagram's carousel limit); empty/invalid defaults to 7. This is separate from the 20-photo import minimum in step 2. Tapping a pack card opens its preview.
 4. **Vibe preview (required step, not optional)** — the pack card opens a sheet with ~5 bundled sample images in that pack's look; its **"use this vibe" button is the CTA that selects the pack AND starts curation.** There is no separate preview link — this forces the user to actually see each aesthetic before committing.
-5. **Curation progress** — on-device scoring: aesthetic quality PLUS emotional signals (recurring people boosted — someone in 15 of your 200 photos matters to you; group shots boosted); blurry photos, duplicates, and screenshots rejected; selection enforces dump composition (people / places / food / details mix, people-first), not a raw quality ranking.
+5. **Curation progress** — on-device scoring: aesthetic quality PLUS emotional signals (group shots boosted — a photo with more than one person in it together reads as more meaningful than a solo shot); blurry photos, duplicates, and screenshots rejected; selection enforces dump composition (people / places / food / details mix, people-first), not a raw quality ranking.
 6. **Curation showcase (no decisions)** — headline "our favorites". Instead of a static results grid, the chosen photos fade in one at a time, accumulating into a collage (exact timing in UI_NOTES §4), then flow the user **directly** into editing. Rationale: a results screen is a judgment checkpoint where a disappointed user churns; a reveal creates momentum and gets them invested before they evaluate. There is deliberately no accept/reject step here.
 7. **3-way edit, per photo** — each photo is shown in the 3 edit variants **of the selected Vibe Pack** (never the pack list again). Tapping a variant pill or swiping horizontally on the photo changes which variant is displayed — pill highlight and photo stay in sync; neither action advances. Variant 1 is pre-selected on arrival, so a user who likes it can advance in one tap. The primary button, **"keep this one,"** commits the currently displayed variant and advances to the next photo; the back control returns to the previous photo with its pick intact and re-editable. An **"advanced"** control opens a sheet with intensity / brightness / contrast / crop for that photo. A quiet "skip this photo" removes a pick the user hates (next-best backfills, keeping composition valid).
 8. **Final review ("the final touches")** — after the last edit the user lands here directly; no "ready to post?" branch, no restart invitation. A swipeable Instagram-style carousel of the exact post with drag-to-reorder, per-photo remove, and per-photo adjust. Beneath it: the **"what we left out"** row — adaptive 2–5 runner-ups (sized by emotional near-misses), each with a persistent + to add or swap in.
@@ -48,7 +48,7 @@ Both personas: iPhone users, personal (not Creator/Business) Instagram accounts.
 | # | Feature | Notes |
 |---|---------|-------|
 | P0.1 | Photo import via PHPicker | No photo-library permission required — PHPicker reads user-picked photos only. Add-only permission is requested once, at export |
-| P0.2 | On-device photo scoring & dedupe | Vision framework: quality, faces, blur; recurring-person and group-shot boosts; perceptual-hash similarity clustering; screenshot rejection |
+| P0.2 | On-device photo scoring & dedupe | Vision framework: quality, faces, blur; group-shot boosts; perceptual-hash similarity clustering; screenshot rejection |
 | P0.3 | Photo count text input | Numeric field, "7 is the sweet spot" helper; count blocked below 4 (composition variety can't resolve below that) or above 20 (Instagram's carousel limit); empty/invalid defaults to 7. Separate from the 20-photo import minimum |
 | P0.4 | Composition-aware selection | People/place/food/detail variety; no user decision surface at this stage |
 | P0.5 | Curation showcase animation | "our favorites" — staggered fade-in collage of the picks, auto-advances into editing. Exact timing in UI_NOTES §4 |
@@ -97,7 +97,7 @@ New packs ship whenever a good idea comes — no fixed cadence. Pack architectur
 
 - **SwiftUI + Swift**, built with Claude Code. First iOS app → keep dependency count at ~zero.
 - **No accounts, no backend, no cloud:** no login screen, no server. All scoring and editing runs on the user's iPhone. Zero signup friction, zero monthly infrastructure cost regardless of user count, nothing to maintain besides the app.
-- **Vision framework** (on-device): aesthetics scoring, feature prints for similarity, face detection/quality, face-crop clustering for recurring people.
+- **Vision framework** (on-device): aesthetics scoring, feature prints for similarity, face detection/quality.
 - **Core Image** for all edit rendering (GPU, real-time); CoreGraphics for frame/timestamp composites.
 - **Single exception (P1 captions):** one serverless endpoint (Vercel) proxying the Claude API so the API key is never embedded in the app. Hard daily spend cap. No user data stored.
 
@@ -106,7 +106,7 @@ New packs ship whenever a good idea comes — no fixed cadence. Pack architectur
 | Risk | Mitigation |
 |---|---|
 | Apple or Instagram ships native "AI select best photos" | Moat is taste, not selection: opinionated Vibe Packs, pack brand names, trend speed. Selection is the hook, packs are the retention |
-| AI misses an emotionally important photo (the "best friend" problem) | Recurring-person + group boosts; composition variety; "skip this photo" during edits; "what we left out" row at final review; humble "our favorites" framing |
+| AI misses an emotionally important photo (the "best friend" problem) | Group boosts; composition variety; "skip this photo" during edits; "what we left out" row at final review; humble "our favorites" framing |
 | Selection quality below the "better taste than me" bar | Concrete test: testers hand-pick 7 from their own 100 photos → AI picks must heavily overlap or be rated equal/better. Gate at Phase 3 and TestFlight |
 | Showcase-then-edit flow hides a bad selection until late | The final review screen is the safety net: full preview, remove, and runner-up swaps before anything is final |
 | Edits look mid → no differentiation | Timebox dedicated days purely on filter tuning against reference photos; test with target-persona users on TestFlight |
