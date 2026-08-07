@@ -13,6 +13,8 @@ import SwiftUI
 struct ScoringDebugGridView: View {
     let photos: [Photo]
     let scores: [PhotoScore]
+    var failedCount: Int = 0
+    var failureReasons: [String] = []
 
     @State private var sortDescending = true
     @State private var enlarged: PhotoScore?
@@ -27,9 +29,18 @@ struct ScoringDebugGridView: View {
         }
     }
 
+    /// So "no good photos in this roll" (scores empty, failedCount 0) reads
+    /// differently from "scoring broke" (scores empty, failedCount > 0).
+    private var titleText: String {
+        failedCount > 0 ? "scoring debug (\(scores.count) ok, \(failedCount) failed)" : "scoring debug (\(scores.count))"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
+                if scores.isEmpty && failedCount > 0 {
+                    failureBanner
+                }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], spacing: 8) {
                     ForEach(sortedScores) { score in
                         if let photo = photosByID[score.id] {
@@ -41,7 +52,7 @@ struct ScoringDebugGridView: View {
                 .padding(12)
             }
             .background(Color(hex: "F7F4EE"))
-            .navigationTitle("scoring debug (\(scores.count))")
+            .navigationTitle(titleText)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -60,6 +71,23 @@ struct ScoringDebugGridView: View {
         }
         .preferredColorScheme(.light)
     }
+
+    private var failureBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("scoring broke -- \(failedCount)/\(failedCount + scores.count) photos threw")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+            ForEach(failureReasons, id: \.self) { reason in
+                Text(reason)
+                    .font(.system(size: 11, design: .monospaced))
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.red.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(12)
+    }
 }
 
 private struct ScoreCard: View {
@@ -75,11 +103,21 @@ private struct ScoreCard: View {
                     .frame(height: 130)
                     .clipped()
 
-                if score.isUtility {
-                    Text("UTILITY")
+                if score.isHardRejected {
+                    Text("REJECTED")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .padding(3)
                         .background(.red.opacity(0.85))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                } else if score.isUtility {
+                    // Flagged isUtility by Vision but spared the hard reject
+                    // because its aesthetic score isn't low -- surfaced
+                    // distinctly so false positives like this stay visible.
+                    Text("UTILITY?")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .padding(3)
+                        .background(.orange.opacity(0.85))
                         .foregroundStyle(.white)
                         .padding(4)
                 }
@@ -104,7 +142,7 @@ private struct ScoreCard: View {
 
             Group {
                 Text("aes \(String(format: "%.2f", score.rawAestheticScore))")
-                Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))")
+                Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))  hum \(score.humanCount)")
                 Text("grp \(String(format: "%.1f", score.groupBonus))  imp \(String(format: "%.2f", score.importantPersonBoost))")
                 if let sharpness = score.sharpness {
                     Text("sharp \(String(format: "%.2f", sharpness))")
@@ -146,11 +184,13 @@ private struct ScoreDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         row("composite", String(format: "%.4f", score.compositeScore))
                         row("category", score.category.rawValue)
-                        row("utility", score.isUtility ? "YES (hard reject)" : "no")
+                        row("isUtility (raw Vision flag)", score.isUtility ? "yes" : "no")
+                        row("hard rejected", score.isHardRejected ? "YES -- isUtility AND aesthetic < \(CompositeScoring.utilityAestheticGate)" : score.isUtility ? "no -- utility flag present but aesthetic not low enough" : "no")
                         row("raw aesthetic", String(format: "%.4f", score.rawAestheticScore))
                         row("normalized aesthetic", String(format: "%.4f", CompositeScoring.normalizeAesthetic(score.rawAestheticScore)))
                         row("face count", "\(score.faceCount)")
                         row("best face quality", String(format: "%.4f", score.bestFaceQuality))
+                        row("human count (body detection)", "\(score.humanCount)")
                         row("group bonus", String(format: "%.2f", score.groupBonus))
                         row("important-person boost", "\(String(format: "%.4f", score.importantPersonBoost)) (weight 0 -- see item 4)")
                         row("cluster ID", score.personClusterID.map(String.init) ?? "none")

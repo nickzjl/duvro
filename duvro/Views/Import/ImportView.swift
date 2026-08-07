@@ -43,10 +43,23 @@ struct ImportView: View {
         }
         #if DEBUG
         .sheet(isPresented: $showScoringGrid) {
-            ScoringDebugGridView(photos: importService.photos, scores: scoringService.scores)
+            ScoringDebugGridView(
+                photos: importService.photos,
+                scores: scoringService.scores,
+                failedCount: scoringService.failedCount,
+                failureReasons: scoringService.failureReasons
+            )
         }
         .sheet(isPresented: $showClusterInspector) {
             ClusterInspectorView(clusters: scoringService.personClusters)
+        }
+        .onChange(of: scoringService.isScoring) { wasScoring, isScoringNow in
+            // Auto-present the grid the moment a scoring pass finishes, whether
+            // it produced results or not -- an empty grid is itself a signal
+            // something's wrong, and shouldn't be hidden behind a manual tap.
+            if wasScoring && !isScoringNow {
+                showScoringGrid = true
+            }
         }
         #endif
     }
@@ -148,6 +161,10 @@ struct ImportView: View {
             if scoringService.isScoring {
                 Text(String(format: "scoring %d/%d · peak %.0fMB", scoringService.scoredCount, scoringService.totalCount, scoringService.peakMemoryMB))
                     .font(.system(size: 11, design: .monospaced))
+            } else if scoringService.failedCount > 0 {
+                Text(String(format: "scored %d ok, %d FAILED, in %.2fs · peak %.0fMB", scoringService.scores.count, scoringService.failedCount, scoringService.elapsedSeconds, scoringService.peakMemoryMB))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.red)
             } else if !scoringService.scores.isEmpty {
                 Text(String(format: "scored %d in %.2fs · peak %.0fMB", scoringService.scores.count, scoringService.elapsedSeconds, scoringService.peakMemoryMB))
                     .font(.system(size: 11, design: .monospaced))
@@ -158,7 +175,7 @@ struct ImportView: View {
                 }
                 .disabled(scoringService.isScoring)
 
-                if !scoringService.scores.isEmpty {
+                if !scoringService.scores.isEmpty || scoringService.failedCount > 0 {
                     Button("grid") { showScoringGrid = true }
                     Button("clusters") { showClusterInspector = true }
                 }

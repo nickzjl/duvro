@@ -31,6 +31,10 @@ struct PhotoScore: Identifiable, Sendable {
     let faceCount: Int
     /// 0 if no faces; else the best (highest) FaceObservation.CaptureQuality.score among faces.
     let bestFaceQuality: Float
+    /// DetectHumanRectanglesRequest count -- catches mirror shots, distant, and
+    /// back-turned subjects with no detectable face. Only affects categorization
+    /// (see `category`); face count/quality/group bonus are unaffected.
+    let humanCount: Int
     /// Top N classification labels above the confidence threshold, confidence-sorted descending.
     let classificationLabels: [ClassificationLabel]
     let category: PhotoCategory
@@ -49,12 +53,23 @@ struct PhotoScore: Identifiable, Sendable {
     var sharpness: Float?
     var compositeScore: Float
 
+    /// isUtility alone false-positives on ordinary photos that share visual
+    /// traits with documents/screenshots -- observed on-device: a gym-bench
+    /// photo and a laptop-on-desk photo were both flagged despite non-low
+    /// aesthetic scores. True iff both isUtility AND the aesthetic score is
+    /// also low, so a genuine utility image (which should score poorly on
+    /// aesthetics too, since it's not a composed photograph) is still caught.
+    var isHardRejected: Bool {
+        CompositeScoring.isHardRejected(isUtility: isUtility, normalizedAesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore))
+    }
+
     init(
         id: UUID,
         rawAestheticScore: Float,
         isUtility: Bool,
         faceCount: Int,
         bestFaceQuality: Float,
+        humanCount: Int = 0,
         classificationLabels: [ClassificationLabel],
         category: PhotoCategory,
         featurePrint: FeaturePrintObservation?,
@@ -67,6 +82,7 @@ struct PhotoScore: Identifiable, Sendable {
         self.isUtility = isUtility
         self.faceCount = faceCount
         self.bestFaceQuality = bestFaceQuality
+        self.humanCount = humanCount
         self.classificationLabels = classificationLabels
         self.category = category
         self.featurePrint = featurePrint
