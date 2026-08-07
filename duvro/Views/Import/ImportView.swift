@@ -12,7 +12,6 @@ struct ImportView: View {
     #if DEBUG
     @State private var scoringService = ScoringService()
     @State private var showScoringGrid = false
-    @State private var showClusterInspector = false
     #endif
 
     private let minimumPhotos = 20
@@ -49,9 +48,6 @@ struct ImportView: View {
                 failedCount: scoringService.failedCount,
                 failureReasons: scoringService.failureReasons
             )
-        }
-        .sheet(isPresented: $showClusterInspector) {
-            ClusterInspectorView(clusters: scoringService.personClusters)
         }
         .onChange(of: scoringService.isScoring) { wasScoring, isScoringNow in
             // Auto-present the grid the moment a scoring pass finishes, whether
@@ -177,7 +173,6 @@ struct ImportView: View {
 
                 if !scoringService.scores.isEmpty || scoringService.failedCount > 0 {
                     Button("grid") { showScoringGrid = true }
-                    Button("clusters") { showClusterInspector = true }
                 }
             }
             .font(.system(size: 12, weight: .semibold, design: .monospaced))

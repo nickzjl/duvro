@@ -41,17 +41,11 @@ struct PhotoScore: Identifiable, Sendable {
     /// Stored for Phase 3 dedupe. Not consumed this phase.
     let featurePrint: FeaturePrintObservation?
 
-    // MARK: - Recurring-person (computed and displayed only -- see item 4, not wired into composite)
-
-    var personClusterID: Int?
-    /// 0...1, always multiplied by a 0 weight in the composite for now.
-    var importantPersonBoost: Float
-
     // MARK: - Derived
 
-    var groupBonus: Float
+    let groupBonus: Float
     var sharpness: Float?
-    var compositeScore: Float
+    let compositeScore: Float
 
     /// isUtility alone false-positives on ordinary photos that share visual
     /// traits with documents/screenshots -- observed on-device: a gym-bench
@@ -73,8 +67,6 @@ struct PhotoScore: Identifiable, Sendable {
         classificationLabels: [ClassificationLabel],
         category: PhotoCategory,
         featurePrint: FeaturePrintObservation?,
-        personClusterID: Int? = nil,
-        importantPersonBoost: Float = 0,
         sharpness: Float? = nil
     ) {
         self.id = id
@@ -86,28 +78,12 @@ struct PhotoScore: Identifiable, Sendable {
         self.classificationLabels = classificationLabels
         self.category = category
         self.featurePrint = featurePrint
-        self.personClusterID = personClusterID
-        self.importantPersonBoost = importantPersonBoost
         self.groupBonus = faceCount >= 2 ? 1.0 : 0.0
         self.sharpness = sharpness
         self.compositeScore = CompositeScoring.compute(
             aesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore),
-            importantPerson: importantPersonBoost,
             faceQuality: bestFaceQuality,
             groupBonus: faceCount >= 2 ? 1.0 : 0.0,
-            sharpness: sharpness ?? 1.0,
-            isUtility: isUtility
-        )
-    }
-
-    /// Recompute compositeScore in place -- used after the second-pass clustering
-    /// step fills in personClusterID/importantPersonBoost (still 0-weighted).
-    mutating func recomputeComposite() {
-        compositeScore = CompositeScoring.compute(
-            aesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore),
-            importantPerson: importantPersonBoost,
-            faceQuality: bestFaceQuality,
-            groupBonus: groupBonus,
             sharpness: sharpness ?? 1.0,
             isUtility: isUtility
         )

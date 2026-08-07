@@ -4,8 +4,8 @@
 //
 //  DEBUG-only tuning instrument for Phase 2 (BUILD_ROADMAP: "this is the
 //  tuning tool -- build it well"). Not part of the product UI flow.
-//  Shows every photo with every sub-score, the composite, category,
-//  utility flag, and cluster ID; sortable; tap to enlarge.
+//  Shows every photo with every sub-score, the composite, category, and
+//  utility flag; sortable; tap to enlarge.
 //
 
 import SwiftUI
@@ -127,23 +127,12 @@ private struct ScoreCard: View {
             Text(String(format: "%.3f", score.compositeScore))
                 .font(.system(size: 15, weight: .bold, design: .monospaced))
 
-            HStack(spacing: 4) {
-                categoryBadge
-                if let clusterID = score.personClusterID {
-                    Text("C\(clusterID)")
-                        .font(.system(size: 9, design: .monospaced))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color(hex: "A04021").opacity(0.15))
-                        .foregroundStyle(Color(hex: "A04021"))
-                        .clipShape(Capsule())
-                }
-            }
+            categoryBadge
 
             Group {
                 Text("aes \(String(format: "%.2f", score.rawAestheticScore))")
                 Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))  hum \(score.humanCount)")
-                Text("grp \(String(format: "%.1f", score.groupBonus))  imp \(String(format: "%.2f", score.importantPersonBoost))")
+                Text("grp \(String(format: "%.1f", score.groupBonus))")
                 if let sharpness = score.sharpness {
                     Text("sharp \(String(format: "%.2f", sharpness))")
                 }
@@ -192,8 +181,6 @@ private struct ScoreDetailView: View {
                         row("best face quality", String(format: "%.4f", score.bestFaceQuality))
                         row("human count (body detection)", "\(score.humanCount)")
                         row("group bonus", String(format: "%.2f", score.groupBonus))
-                        row("important-person boost", "\(String(format: "%.4f", score.importantPersonBoost)) (weight 0 -- see item 4)")
-                        row("cluster ID", score.personClusterID.map(String.init) ?? "none")
                         row("sharpness", score.sharpness.map { String(format: "%.4f", $0) } ?? "not computed")
                     }
                     .font(.system(size: 13, design: .monospaced))
