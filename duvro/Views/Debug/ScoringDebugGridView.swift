@@ -134,6 +134,7 @@ private struct ScoreCard: View {
                 Text("aes \(String(format: "%.2f", score.rawAestheticScore))")
                 Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))  hum \(score.humanCount)")
                 Text("grp \(String(format: "%.1f", score.groupBonus))")
+                Text("txt \(String(format: "%.2f", score.textCoverage))  blk \(score.textBlockCount)")
             }
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(Color(hex: "777169"))
@@ -180,6 +181,8 @@ private struct ScoreDetailView: View {
                         row("human count (body detection)", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : "\(score.humanCount)")
                         row("group bonus", String(format: "%.2f", score.groupBonus))
                         row("feature print", score.isHardRejected ? "nil (Stage 2 skipped -- rejected)" : (score.featurePrint != nil ? "present" : "nil"))
+                        row("text coverage", "\(String(format: "%.4f", score.textCoverage)) (measurement only, not consumed)")
+                        row("text block count", "\(score.textBlockCount)")
                     }
                     .font(.system(size: 13, design: .monospaced))
 

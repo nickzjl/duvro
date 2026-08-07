@@ -35,13 +35,22 @@
 //  (pre-removal) if this is ever revisited with a different approach.
 //
 //  PER-PHOTO PIPELINE is two stages with a gate between them:
-//    Stage 1: aesthetics + classification
+//    Stage 1: aesthetics + classification + text recognition
 //    GATE:    CompositeScoring.rejectionReason(...) -- if non-nil, return early
 //    Stage 2: face rectangles, face capture quality, human rectangles,
 //             whole-image feature print
 //  A rejected photo's Stage 2 requests are never created, let alone awaited --
 //  this is Vision nominating candidates cheaply before spending the more
 //  expensive per-photo work on faces/bodies/features. See scorePhoto below.
+//
+//  Text recognition (RecognizeTextRequest, .fast level) runs for EVERY photo
+//  in Stage 1, rejected or not -- it's measurement, not a gate. isUtility is
+//  uninformative on real camera rolls (fires on receipts and game-stat
+//  screenshots, but equally on plated food and gym POV shots); the working
+//  hypothesis is that text coverage is what actually separates junk from
+//  keepers, but that needs data before it becomes a rule. textCoverage/
+//  textBlockCount are stored on PhotoScore and shown in the debug grid;
+//  nothing reads them yet -- see CompositeScoring, untouched by this.
 //
 
 import Foundation
@@ -144,6 +153,8 @@ final class ScoringService {
                 classificationLabels: raw.classificationLabels,
                 category: category,
                 featurePrint: raw.featurePrint,
+                textCoverage: raw.textCoverage,
+                textBlockCount: raw.textBlockCount,
                 rejectionReason: raw.rejectionReason
             )
             assembled.append(score)
@@ -172,6 +183,8 @@ final class ScoringService {
         let humanCount: Int
         let classificationLabels: [ClassificationLabel]
         let featurePrint: FeaturePrintObservation?
+        let textCoverage: Float
+        let textBlockCount: Int
         let rejectionReason: CompositeScoring.RejectionReason?
     }
 
@@ -184,12 +197,20 @@ final class ScoringService {
         do {
             let handler = ImageRequestHandler(photo.downsampledURL)
 
-            // MARK: Stage 1 -- aesthetics + classification only.
+            // MARK: Stage 1 -- aesthetics + classification + text recognition.
+            let textRequest: RecognizeTextRequest = {
+                var request = RecognizeTextRequest()
+                request.recognitionLevel = .fast // coverage, not transcription
+                return request
+            }()
+
             async let aestheticsResult = handler.perform(CalculateImageAestheticsScoresRequest())
             async let classifyResult = handler.perform(ClassifyImageRequest())
+            async let textResult = handler.perform(textRequest)
 
             let aesthetics = try await aestheticsResult
             let classifications = try await classifyResult
+            let textObservations = try await textResult
 
             let topLabels = classifications
                 .filter { $0.confidence >= classificationConfidenceThreshold }
@@ -197,6 +218,8 @@ final class ScoringService {
                 .prefix(classificationTopN)
                 .map { ClassificationLabel(identifier: $0.identifier, confidence: $0.confidence) }
             let labels = Array(topLabels)
+
+            let (textCoverage, textBlockCount) = computeTextCoverage(from: textObservations)
 
             // MARK: GATE.
             let normalizedAesthetic = CompositeScoring.normalizeAesthetic(aesthetics.overallScore)
@@ -211,7 +234,7 @@ final class ScoringService {
                 // computed and discarded. No face/human/feature-print Vision
                 // call happens for a rejected photo.
                 #if DEBUG
-                print("[scoring-debug] \(photo.id) REJECTED (\(rejection.displayDescription)) aesthetic=\(aesthetics.overallScore) isUtility=\(aesthetics.isUtility)")
+                print("[scoring-debug] \(photo.id) REJECTED (\(rejection.displayDescription)) aesthetic=\(aesthetics.overallScore) isUtility=\(aesthetics.isUtility) textCoverage=\(textCoverage) textBlocks=\(textBlockCount)")
                 #endif
                 return .success(RawPhotoScore(
                     photoID: photo.id,
@@ -221,6 +244,8 @@ final class ScoringService {
                     humanCount: 0,
                     classificationLabels: labels,
                     featurePrint: nil,
+                    textCoverage: textCoverage,
+                    textBlockCount: textBlockCount,
                     rejectionReason: rejection
                 ))
             }
@@ -250,15 +275,50 @@ final class ScoringService {
                 humanCount: humans.count,
                 classificationLabels: labels,
                 featurePrint: featurePrint,
+                textCoverage: textCoverage,
+                textBlockCount: textBlockCount,
                 rejectionReason: nil
             )
             #if DEBUG
             let labelDump = result.classificationLabels.map { "\($0.identifier):\(String(format: "%.2f", $0.confidence))" }.joined(separator: ", ")
-            print("[scoring-debug] \(photo.id) aesthetic=\(result.rawAestheticScore) isUtility=\(result.isUtility) faces=\(result.faceObservations.count) humans=\(result.humanCount) featurePrint=\(result.featurePrint != nil) labels=[\(labelDump)]")
+            print("[scoring-debug] \(photo.id) aesthetic=\(result.rawAestheticScore) isUtility=\(result.isUtility) faces=\(result.faceObservations.count) humans=\(result.humanCount) featurePrint=\(result.featurePrint != nil) textCoverage=\(textCoverage) textBlocks=\(textBlockCount) labels=[\(labelDump)]")
             #endif
             return .success(result)
         } catch {
             return .failure(photoID: photo.id, error: error)
         }
+    }
+
+    /// Coverage = fraction of the frame covered by text bounding boxes,
+    /// deduplicated so overlapping boxes don't double-count: rasterize the
+    /// union onto a coarse 64x64 grid and count set cells. Deliberately
+    /// simple -- this is a debug metric, not shipping geometry. Coordinates
+    /// are Vision's normalized 0...1 space on both axes, so grid cells sum
+    /// directly to a fraction of the frame with no pixel conversion needed.
+    nonisolated private static func computeTextCoverage(from observations: [RecognizedTextObservation]) -> (coverage: Float, blockCount: Int) {
+        let gridSize = 64
+        var grid = [Bool](repeating: false, count: gridSize * gridSize)
+
+        func gridIndex(_ normalized: CGFloat) -> Int {
+            let clamped = min(max(normalized, 0), 1)
+            return min(gridSize - 1, Int(clamped * CGFloat(gridSize)))
+        }
+
+        for observation in observations {
+            let box = observation.boundingBox.cgRect
+            let minX = gridIndex(box.minX)
+            let maxX = gridIndex(box.maxX)
+            let minY = gridIndex(box.minY)
+            let maxY = gridIndex(box.maxY)
+            guard minX <= maxX, minY <= maxY else { continue }
+            for y in minY...maxY {
+                for x in minX...maxX {
+                    grid[y * gridSize + x] = true
+                }
+            }
+        }
+
+        let setCells = grid.reduce(0) { $0 + ($1 ? 1 : 0) }
+        return (Float(setCells) / Float(gridSize * gridSize), observations.count)
     }
 }

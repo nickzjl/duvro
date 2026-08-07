@@ -47,6 +47,18 @@ struct PhotoScore: Identifiable, Sendable {
     /// (GenerateImageFeaturePrintRequest) never ran. Not consumed this phase.
     let featurePrint: FeaturePrintObservation?
 
+    // MARK: - Text coverage (measurement only -- see ScoringService.textCoverage)
+
+    /// Fraction (0...1) of the frame covered by RecognizeTextRequest bounding
+    /// boxes, deduplicated via a coarse grid so overlapping boxes don't
+    /// double-count. Computed in Stage 1 for EVERY photo, including rejected
+    /// ones -- this is data collection for a future cutoff, not a signal
+    /// anything reads yet.
+    let textCoverage: Float
+    /// Number of RecognizeTextRequest observations (a receipt and a road
+    /// sign can have similar coverage but very different block counts).
+    let textBlockCount: Int
+
     // MARK: - Rejection
 
     /// Set once, in Stage 1 (ScoringService.scorePhoto), before Stage 2 ever
@@ -71,6 +83,8 @@ struct PhotoScore: Identifiable, Sendable {
         classificationLabels: [ClassificationLabel],
         category: PhotoCategory,
         featurePrint: FeaturePrintObservation?,
+        textCoverage: Float = 0,
+        textBlockCount: Int = 0,
         rejectionReason: CompositeScoring.RejectionReason? = nil
     ) {
         self.id = id
@@ -82,6 +96,8 @@ struct PhotoScore: Identifiable, Sendable {
         self.classificationLabels = classificationLabels
         self.category = category
         self.featurePrint = featurePrint
+        self.textCoverage = textCoverage
+        self.textBlockCount = textBlockCount
         self.rejectionReason = rejectionReason
         self.groupBonus = faceCount >= 2 ? 1.0 : 0.0
         self.compositeScore = CompositeScoring.compute(
