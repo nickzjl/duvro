@@ -10,6 +10,20 @@ Companion to `prd.md` (v1.4), `UI_NOTES.md` (design system, motion spec, mockup 
 4. **Humility in copy.** "our favorites ✨" — never "the best photos." "what we left out" — never "rejected." A wrong pick should feel like a taste difference, not a malfunction.
 5. **The bar:** users should feel "these are exactly the photos I would've picked, only better." Tested, not vibed — see the overlap test in Phase 3.
 
+## Deferred work register
+
+Work decided on mid-session and pushed back, which does NOT already appear as a phase checklist item below. Phase checkboxes are scheduled work and stay where they are — this register exists so decisions made in conversation don't get lost between sessions.
+
+**Maintenance rule:** when a future session defers something by decision, add it here. When a deferred item is completed, remove it from this list — the phase checklist and/or the relevant doc will already reflect the completed work.
+
+1. **Golden Hour filter tuning.** Parameters are written but untuned; nobody has seen them rendered. Deferred because tuning is an iterative look-and-adjust loop that needs working plumbing and a human eye. Blocks Phase 4 acceptance ("Golden Hour looks good on 10 diverse test photos").
+2. **EXIF DateTimeOriginal capture at import.** Photo/PhotoImportService never reads it, so no photo carries a timestamp. Deferred by decision. Blocks Phase 3.5's payload (`timestamp` is one of five metrics in prd.md P0.3) and leaves the fallback composite-ordered rather than chronological. Must happen at import time — cannot be backfilled onto already-imported photos. Also unknown whether PHPicker preserves EXIF without library permission; if it strips it, P0.3's contract needs rewriting.
+3. **Clustering threshold retune.** 0.55 put 91 of 134 surviving photos in one cluster. Deferred to prioritize front-end progress. Blocks Phase 3.5 (a broken cluster map poisons `clusterID`, another of the five payload metrics) and degrades the fallback selection's one-per-cluster rule.
+4. **CategoryMapper reliability.** `place` produced 1 photo in 134; food and detail misroute broadly. Deferred. Blocks Phase 3.5's category metric and Phase 3's shortlist quotas.
+5. **SessionStore ownership.** It currently holds only `chosenSelection`; photos and scores still live in ImportView's local `@State`. Deferred as out of scope. Blocks Phase 5+ screens that need access to photos outside ImportView.
+6. **Composition-variety doc pass.** prd.md §2, P0.5, and this file's Phase 3.5 still require people/place/food/detail variety, superseded by the decision that Stage 2 composes from what the roll actually contains. Blocks nothing; corrects docs.
+7. **Phase 3 items not yet built:** the photo count text input on the vibe screen, and near-black/near-white exposure rejection. Deferred to keep Phase 3 scoped to clustering and shortlisting. The count input blocks the vibe screen (Phase 8) and is currently hardcoded to 7 in `FallbackSelectionService`.
+
 ## 0. Ground rules for Claude Code
 
 - **Stack:** Swift 5.10+, SwiftUI only (no UIKit view controllers except where required, e.g., PHPicker wrapper), **zero third-party dependencies**.
