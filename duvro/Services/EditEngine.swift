@@ -30,13 +30,18 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import UIKit
 
-enum EditEngine {
+/// nonisolated: render(photo:variant:) is a pure, stateless, CPU-bound call
+/// with no reason to be pinned to MainActor -- SWIFT_DEFAULT_ACTOR_ISOLATION
+/// = MainActor would otherwise isolate the whole enum by default (same
+/// pattern as CompositeScoring/ClusteringService/ShortlistService). Callers
+/// off the main actor (e.g. a debug or edit screen rendering in the
+/// background so timing/measurement isn't confounded by UI work) need this
+/// to actually be callable from there.
+nonisolated enum EditEngine {
     /// One Metal-backed CIContext, created once, reused for every render.
-    /// `nonisolated`: CIContext is Sendable and documented thread-safe for
-    /// concurrent rendering (Apple's CoreImage docs), so plain `nonisolated`
-    /// is enough -- SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor would
-    /// otherwise isolate this by default (same pattern as CompositeScoring).
-    nonisolated private static let sharedContext: CIContext = {
+    /// CIContext is documented thread-safe for concurrent rendering
+    /// (Apple's CoreImage docs), matching the enum's nonisolated-ness.
+    private static let sharedContext: CIContext = {
         if let device = MTLCreateSystemDefaultDevice() {
             return CIContext(mtlDevice: device)
         }

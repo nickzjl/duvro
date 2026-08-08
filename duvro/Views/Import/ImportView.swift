@@ -15,6 +15,7 @@ struct ImportView: View {
     @State private var showScoringGrid = false
     @State private var shortlistResult: ShortlistResult?
     @State private var showShortlistDebug = false
+    @State private var showEditDebug = false
     #endif
 
     private let minimumPhotos = 20
@@ -68,6 +69,13 @@ struct ImportView: View {
                     selection: sessionStore.chosenSelection
                 )
             }
+        }
+        .sheet(isPresented: $showEditDebug) {
+            EditDebugView(
+                photos: importService.photos,
+                scores: scoringService.scores,
+                chosenSelection: sessionStore.chosenSelection
+            )
         }
         #endif
     }
@@ -200,6 +208,15 @@ struct ImportView: View {
                         shortlistResult = shortlist
                         sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
                         showShortlistDebug = true
+                    }
+
+                    // Doesn't require "shortlist" to have been tapped first --
+                    // EditDebugView falls back to any scored photo when
+                    // sessionStore.chosenSelection is empty/unavailable, so
+                    // Phase 4's render pipeline can be checked independently
+                    // of Phase 3's selection.
+                    Button("render") {
+                        showEditDebug = true
                     }
                 }
             }
