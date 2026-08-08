@@ -11,6 +11,7 @@ struct ImportView: View {
 
     #if DEBUG
     @State private var scoringService = ScoringService()
+    @State private var sessionStore = SessionStore()
     @State private var showScoringGrid = false
     @State private var shortlistResult: ShortlistResult?
     @State private var showShortlistDebug = false
@@ -61,7 +62,11 @@ struct ImportView: View {
         }
         .sheet(isPresented: $showShortlistDebug) {
             if let shortlistResult {
-                ShortlistDebugView(photos: importService.photos, result: shortlistResult)
+                ShortlistDebugView(
+                    photos: importService.photos,
+                    result: shortlistResult,
+                    selection: sessionStore.chosenSelection
+                )
             }
         }
         #endif
@@ -183,8 +188,17 @@ struct ImportView: View {
                 }
 
                 if !scoringService.scores.isEmpty {
+                    // Two services, two results: ShortlistService produces
+                    // the candidate shortlist; FallbackSelectionService
+                    // (Phase 3.5's offline/no-network branch) then chooses
+                    // from it. Neither is computed here -- the view only
+                    // calls the services and stores what they return
+                    // (locally for the shortlist, on the session for the
+                    // chosen selection, per BUILD_ROADMAP's SessionStore).
                     Button("shortlist") {
-                        shortlistResult = ShortlistService.buildShortlist(from: scoringService.scores)
+                        let shortlist = ShortlistService.buildShortlist(from: scoringService.scores)
+                        shortlistResult = shortlist
+                        sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
                         showShortlistDebug = true
                     }
                 }
