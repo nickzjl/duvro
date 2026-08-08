@@ -93,9 +93,9 @@ struct ShortlistDebugView: View {
             Text("category dist. (all surviving): \(categoryDistributionSummary)")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color(hex: "777169"))
-            Text(String(format: "clustering + shortlist: %.3fs", result.elapsedSeconds))
+            Text(String(format: "clustering + shortlist: %.3fs · %d distance-compute failures", result.elapsedSeconds, result.clusteringDistanceFailureCount))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color(hex: "777169"))
+                .foregroundStyle(result.clusteringDistanceFailureCount > 0 ? Color(hex: "A04021") : Color(hex: "777169"))
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -52,14 +52,21 @@ nonisolated enum ClusteringService {
         /// Cluster membership, keyed by clusterID. Every value has at least
         /// one element; singleton clusters have exactly one.
         let members: [Int: [UUID]]
+        /// Count of pairwise `distance(to:)` calls that threw and were
+        /// treated as "not a duplicate" rather than failing the whole pass
+        /// (see the loop below). Silent otherwise -- surfaced here so a
+        /// device with no console attached can still tell this happened,
+        /// same reasoning as VibePackLoadError.
+        let distanceFailureCount: Int
     }
 
     /// `scores` must already exclude rejected photos (see file header).
     static func cluster(_ scores: [PhotoScore]) -> Result {
         let n = scores.count
-        guard n > 0 else { return Result(clusterID: [:], members: [:]) }
+        guard n > 0 else { return Result(clusterID: [:], members: [:], distanceFailureCount: 0) }
 
         var parent = Array(0..<n)
+        var distanceFailureCount = 0
 
         func find(_ x: Int) -> Int {
             var x = x
@@ -80,6 +87,7 @@ nonisolated enum ClusteringService {
             for j in (i + 1)..<n {
                 guard let fingerprintJ = scores[j].featurePrint else { continue }
                 guard let distance = try? fingerprintI.distance(to: fingerprintJ) else {
+                    distanceFailureCount += 1
                     #if DEBUG
                     print("[clustering] distance computation failed for \(scores[i].id)/\(scores[j].id), treating as not-a-duplicate")
                     #endif
@@ -110,6 +118,6 @@ nonisolated enum ClusteringService {
             members[id, default: []].append(scores[i].id)
         }
 
-        return Result(clusterID: clusterID, members: members)
+        return Result(clusterID: clusterID, members: members, distanceFailureCount: distanceFailureCount)
     }
 }

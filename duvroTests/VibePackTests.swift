@@ -159,30 +159,52 @@ struct VibePackTests {
         }
     }
 
-    // MARK: - VibePackLoader: fails safe, never throws, never crashes
+    // MARK: - VibePackLoader: fails safe (Result, never throws/crashes),
+    // and each failure case carries a reason a caller can show without a
+    // console attached.
 
-    @Test func goldenHourLoadsFromTheAppBundle() {
+    @Test func goldenHourLoadsFromTheAppBundle() throws {
         // The unit test target is app-hosted (TEST_HOST/BUNDLE_LOADER in
         // the project settings), so Bundle.main here is the real running
         // duvro.app bundle, which ships golden_hour.json.
-        let pack = VibePackLoader.load(named: "golden_hour")
-        #expect(pack != nil)
-        #expect(pack?.variants.count == 3)
-        #expect(pack?.variants.map(\.name) == ["Sun-kissed", "Warm Film", "Soft Glow"])
+        let result = VibePackLoader.load(named: "golden_hour")
+        guard case .success(let pack) = result else {
+            Issue.record("expected .success, got \(result)")
+            return
+        }
+        #expect(pack.variants.count == 3)
+        #expect(pack.variants.map(\.name) == ["Sun-kissed", "Warm Film", "Soft Glow"])
     }
 
-    @Test func missingPackReturnsNilRatherThanThrowing() {
-        let pack = VibePackLoader.load(named: "does_not_exist_pack_xyz")
-        #expect(pack == nil)
+    @Test func missingPackReturnsMissingOrUnreadable() {
+        let result = VibePackLoader.load(named: "does_not_exist_pack_xyz")
+        guard case .failure(let error) = result else {
+            Issue.record("expected .failure, got \(result)")
+            return
+        }
+        guard case .missingOrUnreadable(let name, let searchedPaths) = error else {
+            Issue.record("expected .missingOrUnreadable, got \(error)")
+            return
+        }
+        #expect(name == "does_not_exist_pack_xyz")
+        #expect(searchedPaths.count == 2) // Packs/ subdirectory, then bundle root
     }
 
-    @Test func malformedJSONReturnsNilRatherThanThrowing() throws {
+    @Test func malformedJSONReturnsDecodeFailed() throws {
         let bundle = try Self.makeTestBundle(files: ["broken_pack.json": "{ this is not valid json"])
-        let pack = VibePackLoader.load(named: "broken_pack", bundle: bundle)
-        #expect(pack == nil)
+        let result = VibePackLoader.load(named: "broken_pack", bundle: bundle)
+        guard case .failure(let error) = result else {
+            Issue.record("expected .failure, got \(result)")
+            return
+        }
+        guard case .decodeFailed(let path, _) = error else {
+            Issue.record("expected .decodeFailed, got \(error)")
+            return
+        }
+        #expect(path.hasSuffix("broken_pack.json"))
     }
 
-    @Test func wrongVariantCountReturnsNilRatherThanThrowing() throws {
+    @Test func wrongVariantCountReturnsWrongVariantCount() throws {
         let json = """
         {
           "id": "two_variant_pack",
@@ -194,8 +216,18 @@ struct VibePackTests {
         }
         """
         let bundle = try Self.makeTestBundle(files: ["two_variant_pack.json": json])
-        let pack = VibePackLoader.load(named: "two_variant_pack", bundle: bundle)
-        #expect(pack == nil)
+        let result = VibePackLoader.load(named: "two_variant_pack", bundle: bundle)
+        guard case .failure(let error) = result else {
+            Issue.record("expected .failure, got \(result)")
+            return
+        }
+        guard case .wrongVariantCount(let path, let found, let expected) = error else {
+            Issue.record("expected .wrongVariantCount, got \(error)")
+            return
+        }
+        #expect(path.hasSuffix("two_variant_pack.json"))
+        #expect(found == 2)
+        #expect(expected == 3)
     }
 
     // MARK: - EditEngine: a malformed op falls back to the original photo

@@ -27,7 +27,7 @@ struct EditDebugView: View {
 
     @State private var renders: [RenderResult] = []
     @State private var isRendering = false
-    @State private var packLoadFailed = false
+    @State private var packLoadError: VibePackLoadError?
 
     private struct RenderResult: Identifiable {
         var id: String { variantName }
@@ -68,8 +68,8 @@ struct EditDebugView: View {
                             Text("rendering…")
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Color(hex: "777169"))
-                        } else if packLoadFailed {
-                            failureBanner
+                        } else if let packLoadError {
+                            failureBanner(packLoadError)
                         } else {
                             ForEach(renders) { result in
                                 variantCard(result)
@@ -113,14 +113,32 @@ struct EditDebugView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private var failureBanner: some View {
-        Text("golden_hour pack failed to load -- see console (VibePackLoader logs the reason)")
-            .font(.system(size: 12, weight: .bold, design: .monospaced))
-            .foregroundStyle(.white)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.red.opacity(0.85))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    private func failureBanner(_ error: VibePackLoadError) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("golden_hour pack failed to load — \(failureKind(error))")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+            Text(error.diagnosticDescription)
+                .font(.system(size: 11, design: .monospaced))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(.white)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.red.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    /// Short label for the headline; the full detail (including the
+    /// path(s) looked up) is in `error.diagnosticDescription` below it --
+    /// this screen is the only place the reason surfaces on a device with
+    /// no console attached, so both the category and the detail need to be
+    /// readable without Xcode.
+    private func failureKind(_ error: VibePackLoadError) -> String {
+        switch error {
+        case .missingOrUnreadable: return "missing/unreadable"
+        case .decodeFailed: return "decode failed"
+        case .wrongVariantCount: return "wrong variant count"
+        }
     }
 
     // MARK: - Cards
@@ -170,12 +188,16 @@ struct EditDebugView: View {
 
     private func render() async {
         guard let sourcePhoto else { return }
-        guard let pack = VibePackLoader.load(named: "golden_hour") else {
-            packLoadFailed = true
+        let pack: VibePack
+        switch VibePackLoader.load(named: "golden_hour") {
+        case .failure(let error):
+            packLoadError = error
             renders = []
             return
+        case .success(let loaded):
+            pack = loaded
         }
-        packLoadFailed = false
+        packLoadError = nil
         isRendering = true
         renders = []
 

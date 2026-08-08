@@ -43,6 +43,10 @@ struct ShortlistResult {
     /// shortlist step doesn't meaningfully add to scoring time. Excludes
     /// ScoringService's own elapsed time.
     let elapsedSeconds: Double
+    /// Passed through from ClusteringService.Result -- see its doc comment.
+    /// Surfaced here too so the debug view doesn't need its own reference
+    /// to ClusteringService's output.
+    let clusteringDistanceFailureCount: Int
 }
 
 nonisolated enum ShortlistService {
@@ -120,7 +124,8 @@ nonisolated enum ShortlistService {
             clusterMembers: clusters.members,
             surviving: surviving,
             rejectedCount: rejectedCount,
-            elapsedSeconds: elapsed
+            elapsedSeconds: elapsed,
+            clusteringDistanceFailureCount: clusters.distanceFailureCount
         )
     }
 }
