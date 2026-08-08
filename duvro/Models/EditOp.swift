@@ -18,7 +18,12 @@
 
 import CoreGraphics
 
-enum EditOp: Sendable, Equatable {
+/// nonisolated: pure data, decoded from JSON and read from EditEngine's
+/// nonisolated render path. SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor would
+/// otherwise isolate this type (and its custom Codable conformance below)
+/// by default -- same fix pattern as CompositeScoring/ClusteringService/
+/// ShortlistService/VibePack.
+nonisolated enum EditOp: Sendable, Equatable {
     /// Five-point spline tone curve (perceptual/gamma-2 space, matching
     /// CIToneCurve). Exactly 5 points, each 0...1 on both axes for a
     /// typical curve (values outside that range are valid CI input but
@@ -43,7 +48,10 @@ enum EditOp: Sendable, Equatable {
     case fade(amount: Double)
 }
 
-extension EditOp: Codable {
+/// nonisolated on the extension too -- the Codable conformance is declared
+/// here, separately from the enum's primary declaration above, and
+/// isolation doesn't inherit across that split automatically.
+nonisolated extension EditOp: Codable {
     private enum OpType: String, Codable {
         case toneCurve, colorControls, temperatureTint, vignette, bloom, grain, fade
     }

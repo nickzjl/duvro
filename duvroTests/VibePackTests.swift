@@ -1,0 +1,264 @@
+//
+//  VibePackTests.swift
+//  duvroTests
+//
+//  Phase 4 unit tests: pack parsing (EditOp's discriminated-union Codable,
+//  VibePack's structural requirements), and the fail-safe contract --
+//  missing/malformed/wrong-shaped packs never throw past VibePackLoader,
+//  and a malformed op never blanks a render, it falls back toward the
+//  original photo.
+//
+
+import Testing
+import Foundation
+import CoreGraphics
+import UIKit
+@testable import duvro
+
+struct VibePackTests {
+
+    // MARK: - EditOp Codable (one positive case per op)
+
+    @Test func decodesToneCurve() throws {
+        let json = Data("""
+        { "type": "toneCurve", "points": [
+            {"x":0,"y":0}, {"x":0.25,"y":0.25}, {"x":0.5,"y":0.5}, {"x":0.75,"y":0.75}, {"x":1,"y":1}
+        ] }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .toneCurve(let points) = op else {
+            Issue.record("expected .toneCurve, got \(op)")
+            return
+        }
+        #expect(points.count == 5)
+        #expect(points[2] == CGPoint(x: 0.5, y: 0.5))
+    }
+
+    @Test func decodesColorControls() throws {
+        let json = Data("""
+        { "type": "colorControls", "saturation": 1.2, "brightness": 0.05, "contrast": 1.1 }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .colorControls(let saturation, let brightness, let contrast) = op else {
+            Issue.record("expected .colorControls, got \(op)")
+            return
+        }
+        #expect(saturation == 1.2)
+        #expect(brightness == 0.05)
+        #expect(contrast == 1.1)
+    }
+
+    @Test func decodesTemperatureTint() throws {
+        let json = Data("""
+        { "type": "temperatureTint", "temperature": 5200, "tint": 6 }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .temperatureTint(let temperature, let tint) = op else {
+            Issue.record("expected .temperatureTint, got \(op)")
+            return
+        }
+        #expect(temperature == 5200)
+        #expect(tint == 6)
+    }
+
+    @Test func decodesVignette() throws {
+        let json = Data("""
+        { "type": "vignette", "intensity": 0.3, "radius": 1.5 }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .vignette(let intensity, let radius) = op else {
+            Issue.record("expected .vignette, got \(op)")
+            return
+        }
+        #expect(intensity == 0.3)
+        #expect(radius == 1.5)
+    }
+
+    @Test func decodesBloom() throws {
+        let json = Data("""
+        { "type": "bloom", "radius": 8, "intensity": 0.4 }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .bloom(let radius, let intensity) = op else {
+            Issue.record("expected .bloom, got \(op)")
+            return
+        }
+        #expect(radius == 8)
+        #expect(intensity == 0.4)
+    }
+
+    @Test func decodesGrain() throws {
+        let json = Data("""
+        { "type": "grain", "intensity": 0.05, "size": 1.2 }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .grain(let intensity, let size) = op else {
+            Issue.record("expected .grain, got \(op)")
+            return
+        }
+        #expect(intensity == 0.05)
+        #expect(size == 1.2)
+    }
+
+    @Test func decodesFade() throws {
+        let json = Data("""
+        { "type": "fade", "amount": 0.15 }
+        """.utf8)
+        let op = try JSONDecoder().decode(EditOp.self, from: json)
+        guard case .fade(let amount) = op else {
+            Issue.record("expected .fade, got \(op)")
+            return
+        }
+        #expect(amount == 0.15)
+    }
+
+    @Test func unknownOpTypeFailsToDecode() {
+        let json = Data("""
+        { "type": "lightLeak", "intensity": 0.5 }
+        """.utf8)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(EditOp.self, from: json)
+        }
+    }
+
+    @Test func opMissingARequiredFieldFailsToDecode() {
+        let json = Data("""
+        { "type": "toneCurve" }
+        """.utf8)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(EditOp.self, from: json)
+        }
+    }
+
+    // MARK: - VibePack structural parsing
+
+    @Test func decodesAWellFormedPack() throws {
+        let json = Data("""
+        {
+          "id": "test_pack",
+          "displayName": "Test Pack",
+          "variants": [
+            { "name": "A", "ops": [{ "type": "fade", "amount": 0.1 }] },
+            { "name": "B", "ops": [{ "type": "fade", "amount": 0.2 }] },
+            { "name": "C", "ops": [{ "type": "fade", "amount": 0.3 }] }
+          ]
+        }
+        """.utf8)
+        let pack = try JSONDecoder().decode(VibePack.self, from: json)
+        #expect(pack.id == "test_pack")
+        #expect(pack.variants.count == 3)
+        #expect(pack.variants.map(\.name) == ["A", "B", "C"])
+    }
+
+    @Test func packMissingVariantsFailsToDecode() {
+        let json = Data("""
+        { "id": "broken", "displayName": "Broken" }
+        """.utf8)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(VibePack.self, from: json)
+        }
+    }
+
+    // MARK: - VibePackLoader: fails safe, never throws, never crashes
+
+    @Test func goldenHourLoadsFromTheAppBundle() {
+        // The unit test target is app-hosted (TEST_HOST/BUNDLE_LOADER in
+        // the project settings), so Bundle.main here is the real running
+        // duvro.app bundle, which ships golden_hour.json.
+        let pack = VibePackLoader.load(named: "golden_hour")
+        #expect(pack != nil)
+        #expect(pack?.variants.count == 3)
+        #expect(pack?.variants.map(\.name) == ["Sun-kissed", "Warm Film", "Soft Glow"])
+    }
+
+    @Test func missingPackReturnsNilRatherThanThrowing() {
+        let pack = VibePackLoader.load(named: "does_not_exist_pack_xyz")
+        #expect(pack == nil)
+    }
+
+    @Test func malformedJSONReturnsNilRatherThanThrowing() throws {
+        let bundle = try Self.makeTestBundle(files: ["broken_pack.json": "{ this is not valid json"])
+        let pack = VibePackLoader.load(named: "broken_pack", bundle: bundle)
+        #expect(pack == nil)
+    }
+
+    @Test func wrongVariantCountReturnsNilRatherThanThrowing() throws {
+        let json = """
+        {
+          "id": "two_variant_pack",
+          "displayName": "Two",
+          "variants": [
+            { "name": "A", "ops": [] },
+            { "name": "B", "ops": [] }
+          ]
+        }
+        """
+        let bundle = try Self.makeTestBundle(files: ["two_variant_pack.json": json])
+        let pack = VibePackLoader.load(named: "two_variant_pack", bundle: bundle)
+        #expect(pack == nil)
+    }
+
+    // MARK: - EditEngine: a malformed op falls back to the original photo
+
+    @Test func renderFallsBackToOriginalWhenTheOnlyOpIsMalformed() throws {
+        let photo = try Self.makeTestPhoto()
+        // toneCurve requires exactly 5 points (EditEngine.applyToneCurve);
+        // zero points is the malformed case it explicitly guards against.
+        // As the ONLY op in the chain, the whole chain is a no-op, so the
+        // render should come back as the original image, not a blank frame.
+        let variant = EditVariant(name: "broken", ops: [.toneCurve(points: [])])
+
+        let rendered = EditEngine.render(photo: photo, variant: variant)
+        let original = UIImage(contentsOfFile: photo.downsampledURL.path)
+
+        #expect(original != nil)
+        #expect(rendered.size == original?.size)
+        #expect(rendered.size.width > 0 && rendered.size.height > 0)
+    }
+
+    @Test func renderNeverCrashesOnAnEmptyOpChain() throws {
+        let photo = try Self.makeTestPhoto()
+        let variant = EditVariant(name: "empty", ops: [])
+        let rendered = EditEngine.render(photo: photo, variant: variant)
+        #expect(rendered.size.width > 0 && rendered.size.height > 0)
+    }
+
+    // MARK: - Fixtures
+
+    /// A directory wrapped as a Bundle, so VibePackLoader's fail-safe paths
+    /// can be exercised against controlled fixtures instead of relying on
+    /// the shipped golden_hour.json happening to stay broken/fine.
+    private static func makeTestBundle(files: [String: String]) throws -> Bundle {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("duvro-pack-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (name, contents) in files {
+            try contents.write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        guard let bundle = Bundle(url: dir) else {
+            struct BundleCreationFailed: Error {}
+            throw BundleCreationFailed()
+        }
+        return bundle
+    }
+
+    /// A tiny solid-color JPEG on disk, wrapped as a Photo -- enough for
+    /// EditEngine.render to have a real, decodable source image without a
+    /// real camera-roll asset.
+    private static func makeTestPhoto() throws -> Photo {
+        let size = CGSize(width: 8, height: 8)
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            UIColor.orange.setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+        }
+        guard let data = image.jpegData(compressionQuality: 0.9) else {
+            struct TestImageCreationFailed: Error {}
+            throw TestImageCreationFailed()
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("duvro-test-photo-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        try data.write(to: url)
+        return Photo(id: UUID(), originalURL: url, downsampledURL: url, thumbnail: image)
+    }
+}

@@ -10,13 +10,18 @@
 
 import Foundation
 
-struct VibePack: Codable, Sendable {
+/// nonisolated: pure data, decoded from JSON by VibePackLoader and read
+/// from EditEngine's nonisolated render path. SWIFT_DEFAULT_ACTOR_ISOLATION
+/// = MainActor would otherwise isolate the type (and its synthesized
+/// Decodable conformance) by default -- same fix pattern as
+/// CompositeScoring/ClusteringService/ShortlistService.
+nonisolated struct VibePack: Codable, Sendable {
     let id: String
     let displayName: String
     let variants: [EditVariant]
 }
 
-struct EditVariant: Codable, Sendable, Identifiable {
+nonisolated struct EditVariant: Codable, Sendable, Identifiable {
     var id: String { name }
     /// e.g. "Sun-kissed" -- the terracotta-accented name shown under the
     /// pill in the 3-way edit screen (UI_NOTES §1). Not localized in v1.
