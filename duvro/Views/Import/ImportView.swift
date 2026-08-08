@@ -83,7 +83,8 @@ struct ImportView: View {
                 ShortlistDebugView(
                     photos: sessionStore.photos,
                     result: shortlist,
-                    selection: sessionStore.chosenSelection
+                    selection: sessionStore.chosenSelection,
+                    runnerUps: sessionStore.runnerUps
                 )
             }
         }
@@ -248,8 +249,9 @@ struct ImportView: View {
                     sessionStore.setScores(bundle.scores)
                     let shortlist = ShortlistService.buildShortlist(from: bundle.scores)
                     sessionStore.setShortlist(shortlist)
-                    sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
-                    // Runner-ups (Task 4) wired in once RunnerUpService exists.
+                    let chosen = FallbackSelectionService.select(from: shortlist)
+                    sessionStore.setChosenSelection(chosen)
+                    sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
                     showShortlistDebug = true
                 }
             }

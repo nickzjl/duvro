@@ -21,6 +21,7 @@ struct ShortlistDebugView: View {
     let photos: [Photo]
     let result: ShortlistResult
     var selection: FallbackSelectionResult?
+    var runnerUps: [PhotoScore] = []
 
     private var photosByID: [UUID: Photo] {
         Dictionary(uniqueKeysWithValues: photos.map { ($0.id, $0) })
@@ -45,6 +46,9 @@ struct ShortlistDebugView: View {
                     header
                     if let selection {
                         chosenSection(selection)
+                    }
+                    if !runnerUps.isEmpty {
+                        runnerUpSection
                     }
                     ForEach(groupedByCategory, id: \.category) { group in
                         categorySection(group.category, group.items)
@@ -124,6 +128,28 @@ struct ShortlistDebugView: View {
                             position: index + 1,
                             clusterID: result.clusterID[score.id] ?? -1
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Runner-ups (RunnerUpService output, "what we left out")
+
+    private var runnerUpSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("runner-ups \(runnerUps.count) (adaptive \(RunnerUpService.minCount)–\(RunnerUpService.maxCount), threshold \(String(format: "%.2f", RunnerUpService.closenessThreshold)))")
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(hex: "777169"))
+                .foregroundStyle(.white)
+                .clipShape(Capsule())
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+                ForEach(runnerUps) { score in
+                    if let photo = photosByID[score.id] {
+                        ShortlistCard(photo: photo, score: score, clusterID: result.clusterID[score.id] ?? -1)
                     }
                 }
             }

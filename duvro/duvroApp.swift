@@ -77,7 +77,9 @@ struct DebugLaunchRootView: View {
             sessionStore.setScores(bundle.scores)
             let shortlist = ShortlistService.buildShortlist(from: bundle.scores)
             sessionStore.setShortlist(shortlist)
-            sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
+            let chosen = FallbackSelectionService.select(from: shortlist)
+            sessionStore.setChosenSelection(chosen)
+            sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
             loaded = true
         }
     }
@@ -86,7 +88,8 @@ struct DebugLaunchRootView: View {
         ShortlistDebugView(
             photos: sessionStore.photos,
             result: shortlist,
-            selection: sessionStore.chosenSelection
+            selection: sessionStore.chosenSelection,
+            runnerUps: sessionStore.runnerUps
         )
     }
 }
