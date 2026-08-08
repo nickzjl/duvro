@@ -44,11 +44,10 @@ enum DebugLaunch {
 }
 
 /// Builds the DebugFixture into a fresh SessionStore and shows the
-/// requested screen. `editFlow`/`finalReview` are wired to their real
-/// screens in the commits that build them (Phase 5, Phase 6 respectively);
-/// until then (and as a fallback if the fixture can't load, e.g. run on a
-/// machine without this repo's working tree) this falls back to
-/// ShortlistDebugView so the launch path is still verifiable on its own.
+/// requested screen. `finalReview` still falls back to ShortlistDebugView
+/// until the Phase 6 commit swaps it in. If golden_hour.json itself fails
+/// to load, falls back the same way -- the launch path stays verifiable on
+/// its own even if a downstream pack/asset is broken.
 struct DebugLaunchRootView: View {
     let screen: DebugLaunchScreen
     @State private var sessionStore = SessionStore()
@@ -58,14 +57,15 @@ struct DebugLaunchRootView: View {
         Group {
             if loaded, let shortlist = sessionStore.shortlist {
                 switch screen {
-                case .editFlow, .finalReview:
-                    // Replaced with the real destination view as each phase
-                    // lands -- see this file's history for the swap-in.
-                    ShortlistDebugView(
-                        photos: sessionStore.photos,
-                        result: shortlist,
-                        selection: sessionStore.chosenSelection
-                    )
+                case .editFlow:
+                    if case .success(let pack) = VibePackLoader.load(named: "golden_hour") {
+                        EditFlowView(sessionStore: sessionStore, pack: pack, onComplete: {})
+                    } else {
+                        fallback(shortlist)
+                    }
+                case .finalReview:
+                    // Swapped for the real Phase 6 screen in that commit.
+                    fallback(shortlist)
                 }
             } else {
                 ProgressView("loading debug fixture…")
@@ -80,6 +80,14 @@ struct DebugLaunchRootView: View {
             sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
             loaded = true
         }
+    }
+
+    private func fallback(_ shortlist: ShortlistResult) -> some View {
+        ShortlistDebugView(
+            photos: sessionStore.photos,
+            result: shortlist,
+            selection: sessionStore.chosenSelection
+        )
     }
 }
 #endif
