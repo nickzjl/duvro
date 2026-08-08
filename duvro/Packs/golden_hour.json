@@ -1,5 +1,6 @@
 {
   "_note": "UNTUNED. Rough, plausible starting parameters only -- nobody has seen these rendered yet. Do not treat as final; see BUILD_ROADMAP's Deferred work register (\"Golden Hour filter tuning\"). Values will be replaced from rendered output on a real device.",
+  "_schemaNote": "toneCurve points are [x, y] pairs, e.g. [0.25, 0.24] -- NOT {\"x\":...,\"y\":...} objects. This matches CGPoint's actual Codable wire format (an unkeyed 2-element array), confirmed against CoreGraphics.swiftinterface -- {x,y} was a real bug shipped once (decode failure on device, every variant). Digicam/Travel Film authors: copy this format.",
   "id": "golden_hour",
   "displayName": "Golden Hour",
   "variants": [
@@ -8,11 +9,11 @@
       "ops": [
         { "type": "temperatureTint", "temperature": 5200, "tint": 6 },
         { "type": "toneCurve", "points": [
-          { "x": 0,    "y": 0.02 },
-          { "x": 0.25, "y": 0.24 },
-          { "x": 0.5,  "y": 0.54 },
-          { "x": 0.75, "y": 0.82 },
-          { "x": 1,    "y": 0.99 }
+          [0,    0.02],
+          [0.25, 0.24],
+          [0.5,  0.54],
+          [0.75, 0.82],
+          [1,    0.99]
         ] },
         { "type": "colorControls", "saturation": 1.25, "brightness": 0.02, "contrast": 1.08 },
         { "type": "vignette", "intensity": 0.25, "radius": 1.4 },
@@ -26,11 +27,11 @@
       "ops": [
         { "type": "temperatureTint", "temperature": 5000, "tint": 8 },
         { "type": "toneCurve", "points": [
-          { "x": 0,    "y": 0.06 },
-          { "x": 0.25, "y": 0.26 },
-          { "x": 0.5,  "y": 0.52 },
-          { "x": 0.75, "y": 0.76 },
-          { "x": 1,    "y": 0.95 }
+          [0,    0.06],
+          [0.25, 0.26],
+          [0.5,  0.52],
+          [0.75, 0.76],
+          [1,    0.95]
         ] },
         { "type": "colorControls", "saturation": 0.9, "brightness": 0.0, "contrast": 0.95 },
         { "type": "vignette", "intensity": 0.35, "radius": 1.2 },
@@ -44,11 +45,11 @@
       "ops": [
         { "type": "temperatureTint", "temperature": 5600, "tint": 3 },
         { "type": "toneCurve", "points": [
-          { "x": 0,    "y": 0.08 },
-          { "x": 0.25, "y": 0.30 },
-          { "x": 0.5,  "y": 0.55 },
-          { "x": 0.75, "y": 0.78 },
-          { "x": 1,    "y": 0.94 }
+          [0,    0.08],
+          [0.25, 0.30],
+          [0.5,  0.55],
+          [0.75, 0.78],
+          [1,    0.94]
         ] },
         { "type": "colorControls", "saturation": 1.0, "brightness": 0.06, "contrast": 0.88 },
         { "type": "vignette", "intensity": 0.12, "radius": 1.6 },

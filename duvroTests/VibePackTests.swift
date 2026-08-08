@@ -20,9 +20,14 @@ struct VibePackTests {
     // MARK: - EditOp Codable (one positive case per op)
 
     @Test func decodesToneCurve() throws {
+        // Points are [x, y] pairs -- CGPoint's actual Codable wire format
+        // (an unkeyed 2-element array), NOT {"x":...,"y":...}. This fixture
+        // originally used the object form and passed compilation without
+        // ever being executed -- see goldenHourLoadsFromTheAppBundle's
+        // comment for the device bug that shape mismatch caused.
         let json = Data("""
         { "type": "toneCurve", "points": [
-            {"x":0,"y":0}, {"x":0.25,"y":0.25}, {"x":0.5,"y":0.5}, {"x":0.75,"y":0.75}, {"x":1,"y":1}
+            [0,0], [0.25,0.25], [0.5,0.5], [0.75,0.75], [1,1]
         ] }
         """.utf8)
         let op = try JSONDecoder().decode(EditOp.self, from: json)
@@ -163,6 +168,16 @@ struct VibePackTests {
     // and each failure case carries a reason a caller can show without a
     // console attached.
 
+    // Decodes the REAL shipped duvro/Packs/golden_hour.json, not a fixture --
+    // this is what caught the {x,y}-vs-[x,y] CGPoint mismatch shipping to a
+    // device (JSONDecoder is all-or-nothing: if this decodes to .success at
+    // all, every op in every variant already decoded cleanly, since a
+    // failure anywhere in the tree throws before VibePack ever exists). The
+    // op-level assertions below exist for a sharper failure message and to
+    // guard against a *wrong-but-decodable* shape, not because .success
+    // alone would miss something -- the real gap that let the CGPoint bug
+    // through wasn't test coverage, it was that this suite was compiled
+    // (build-for-testing) but never actually executed before this session.
     @Test func goldenHourLoadsFromTheAppBundle() throws {
         // The unit test target is app-hosted (TEST_HOST/BUNDLE_LOADER in
         // the project settings), so Bundle.main here is the real running
@@ -174,6 +189,24 @@ struct VibePackTests {
         }
         #expect(pack.variants.count == 3)
         #expect(pack.variants.map(\.name) == ["Sun-kissed", "Warm Film", "Soft Glow"])
+
+        // Every variant has the full 7-op Golden Hour chain, in order --
+        // BUILD_ROADMAP Phase 4's op list.
+        let expectedOpOrder: [String] = ["temperatureTint", "toneCurve", "colorControls", "vignette", "bloom", "grain", "fade"]
+        for variant in pack.variants {
+            #expect(variant.ops.map(Self.opTypeName) == expectedOpOrder, "\(variant.name)'s op order")
+        }
+
+        // Spot-check the toneCurve op specifically -- 5 points, ascending
+        // x, each point actually a 2-element [x, y] pair round-tripping
+        // through CGPoint's Codable conformance (the exact thing that broke
+        // on device when the JSON used {"x":...,"y":...} objects instead).
+        guard case .toneCurve(let points) = pack.variants[0].ops[1] else {
+            Issue.record("expected variants[0].ops[1] to be .toneCurve")
+            return
+        }
+        #expect(points.count == 5)
+        #expect(points.map(\.x) == [0, 0.25, 0.5, 0.75, 1])
     }
 
     @Test func missingPackReturnsMissingOrUnreadable() {
@@ -256,6 +289,20 @@ struct VibePackTests {
     }
 
     // MARK: - Fixtures
+
+    /// Test-only -- not added to EditOp itself, since nothing in the app
+    /// needs an op's type as a bare string outside this assertion.
+    private static func opTypeName(_ op: EditOp) -> String {
+        switch op {
+        case .toneCurve: return "toneCurve"
+        case .colorControls: return "colorControls"
+        case .temperatureTint: return "temperatureTint"
+        case .vignette: return "vignette"
+        case .bloom: return "bloom"
+        case .grain: return "grain"
+        case .fade: return "fade"
+        }
+    }
 
     /// A directory wrapped as a Bundle, so VibePackLoader's fail-safe paths
     /// can be exercised against controlled fixtures instead of relying on
