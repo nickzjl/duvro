@@ -8,12 +8,17 @@ import SwiftUI
 struct ImportView: View {
     @State private var importService = PhotoImportService()
     @State private var isPickerPresented = false
+    /// Owns photos/scores/shortlist/chosenSelection/runnerUps once they
+    /// exist (SessionStore migration) -- importService/scoringService
+    /// remain the computing services (and keep their own progress/telemetry
+    /// state: isImporting, scoredCount, peakMemoryMB, etc.), but their
+    /// OUTPUT is written into sessionStore rather than read from them
+    /// directly, so Phase 5/6 screens have one place to read from.
+    @State private var sessionStore = SessionStore()
 
     #if DEBUG
     @State private var scoringService = ScoringService()
-    @State private var sessionStore = SessionStore()
     @State private var showScoringGrid = false
-    @State private var shortlistResult: ShortlistResult?
     @State private var showShortlistDebug = false
     @State private var showEditDebug = false
     #endif
@@ -25,7 +30,7 @@ struct ImportView: View {
         ZStack(alignment: .top) {
             Color(hex: "F7F4EE").ignoresSafeArea()
 
-            if importService.photos.isEmpty && !importService.isImporting {
+            if sessionStore.photos.isEmpty && !importService.isImporting {
                 emptyState
             } else {
                 grid
@@ -44,10 +49,22 @@ struct ImportView: View {
             }
             .ignoresSafeArea()
         }
+        // Mirrors importService.photos into sessionStore as it grows, so
+        // the grid stays live/progressive during import (Photo isn't
+        // Equatable, hence watching .count rather than the array itself)
+        // while sessionStore -- not importService -- is what the rest of
+        // the app (and Phase 5/6 screens) reads from. SessionStore
+        // migration; no import behavior changed.
+        .onChange(of: importService.photos.count) {
+            sessionStore.setPhotos(importService.photos)
+        }
         #if DEBUG
+        .onChange(of: scoringService.scores.count) {
+            sessionStore.setScores(scoringService.scores)
+        }
         .sheet(isPresented: $showScoringGrid) {
             ScoringDebugGridView(
-                photos: importService.photos,
+                photos: sessionStore.photos,
                 scores: scoringService.scores,
                 failedCount: scoringService.failedCount,
                 failureReasons: scoringService.failureReasons
@@ -62,18 +79,18 @@ struct ImportView: View {
             }
         }
         .sheet(isPresented: $showShortlistDebug) {
-            if let shortlistResult {
+            if let shortlist = sessionStore.shortlist {
                 ShortlistDebugView(
-                    photos: importService.photos,
-                    result: shortlistResult,
+                    photos: sessionStore.photos,
+                    result: shortlist,
                     selection: sessionStore.chosenSelection
                 )
             }
         }
         .sheet(isPresented: $showEditDebug) {
             EditDebugView(
-                photos: importService.photos,
-                scores: scoringService.scores,
+                photos: sessionStore.photos,
+                scores: sessionStore.scores,
                 chosenSelection: sessionStore.chosenSelection
             )
         }
@@ -111,7 +128,7 @@ struct ImportView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
-                    ForEach(importService.photos) { photo in
+                    ForEach(sessionStore.photos) { photo in
                         Image(uiImage: photo.thumbnail)
                             .resizable()
                             .aspectRatio(4 / 5, contentMode: .fill)
@@ -143,7 +160,7 @@ struct ImportView: View {
         if importService.isImporting {
             return "\(importService.importedCount) of \(importService.totalCount) processed…"
         }
-        let count = importService.photos.count
+        let count = sessionStore.photos.count
         if count < minimumPhotos {
             return "\(count) selected — add a few more, 20 is the minimum for a good curation"
         }
@@ -187,7 +204,7 @@ struct ImportView: View {
             }
             HStack(spacing: 8) {
                 Button(scoringService.isScoring ? "scoring…" : "score photos") {
-                    Task { await scoringService.score(photos: importService.photos) }
+                    Task { await scoringService.score(photos: sessionStore.photos) }
                 }
                 .disabled(scoringService.isScoring)
 
@@ -200,12 +217,12 @@ struct ImportView: View {
                     // the candidate shortlist; FallbackSelectionService
                     // (Phase 3.5's offline/no-network branch) then chooses
                     // from it. Neither is computed here -- the view only
-                    // calls the services and stores what they return
-                    // (locally for the shortlist, on the session for the
-                    // chosen selection, per BUILD_ROADMAP's SessionStore).
+                    // calls the services and stores what they return, on
+                    // sessionStore (SessionStore migration -- previously
+                    // the shortlist was View-local state).
                     Button("shortlist") {
                         let shortlist = ShortlistService.buildShortlist(from: scoringService.scores)
-                        shortlistResult = shortlist
+                        sessionStore.setShortlist(shortlist)
                         sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
                         showShortlistDebug = true
                     }
