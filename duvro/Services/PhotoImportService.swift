@@ -122,7 +122,10 @@ final class PhotoImportService {
         }
     }
 
-    nonisolated private static func downsample(imageAt sourceURL: URL, maxPixelSize: CGFloat, to destinationURL: URL) throws {
+    /// internal, not private: reused by DebugFixture (Simulator-only debug
+    /// tooling, see that file) so it downsamples debug photos identically
+    /// to real imports rather than duplicating this logic.
+    nonisolated static func downsample(imageAt sourceURL: URL, maxPixelSize: CGFloat, to destinationURL: URL) throws {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, sourceOptions) else {
             throw ImportError.decodeFailed
@@ -145,7 +148,8 @@ final class PhotoImportService {
         }
     }
 
-    nonisolated private static func thumbnailImage(from sourceURL: URL, maxPixelSize: CGFloat) throws -> UIImage {
+    /// internal, not private: see the note on `downsample` above.
+    nonisolated static func thumbnailImage(from sourceURL: URL, maxPixelSize: CGFloat) throws -> UIImage {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, sourceOptions) else {
             throw ImportError.decodeFailed

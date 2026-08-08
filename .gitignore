@@ -49,3 +49,9 @@ iOSInjectionProject/
 
 # macOS
 .DS_Store
+
+# Debug-only fixture photos (real, identifiable personal photos -- see
+# duvro/Support/DebugFixture.swift). Deliberately kept out of the Xcode
+# project's synchronized duvro/ folder so they can never end up in any app
+# bundle, and out of git so they never end up in the repo's history either.
+/DebugAssets/

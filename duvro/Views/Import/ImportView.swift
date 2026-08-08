@@ -236,6 +236,22 @@ struct ImportView: View {
                         showEditDebug = true
                     }
                 }
+
+                // Vision doesn't run in the Simulator -- this is the manual
+                // (button-driven) path to the same DebugFixture the
+                // -duvroDebugScreen launch args use, so the fixture's output
+                // is inspectable via the existing debug views too, not just
+                // by launching straight into Phase 5/6.
+                Button("fixture") {
+                    guard let bundle = DebugFixture.load() else { return }
+                    sessionStore.setPhotos(bundle.photos)
+                    sessionStore.setScores(bundle.scores)
+                    let shortlist = ShortlistService.buildShortlist(from: bundle.scores)
+                    sessionStore.setShortlist(shortlist)
+                    sessionStore.setChosenSelection(FallbackSelectionService.select(from: shortlist))
+                    // Runner-ups (Task 4) wired in once RunnerUpService exists.
+                    showShortlistDebug = true
+                }
             }
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
         }
