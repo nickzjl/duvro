@@ -31,9 +31,21 @@ import SwiftUI
 struct EditFlowView: View {
     var sessionStore: SessionStore
     let pack: VibePack
-    /// Called once every photo in the post has a committed pick. Phase 6
-    /// (final review) is where this should navigate; the caller decides.
+    /// When set, edits ONLY this one photo instead of the whole session
+    /// post -- Final Review's "newly added runner-ups route through the
+    /// 3-way edit before joining the post" requirement (UI_NOTES/
+    /// BUILD_ROADMAP Phase 6) reuses this same screen/interaction rather
+    /// than a second implementation, scoped to a single photo. Back and
+    /// skip don't make sense for a photo that isn't in the post yet, so
+    /// they're hidden in this mode (see topBar/utilityRow).
+    var scopedTo: PhotoScore? = nil
+    /// Called once every photo in scope has a committed pick. For the main
+    /// flow: Phase 6 (final review) is where this should navigate. For a
+    /// scoped single-photo edit: the caller is expected to splice the photo
+    /// into the post (SessionStore.addRunnerUp) here.
     var onComplete: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
 
     @State private var currentIndex = 0
     @State private var displayedVariantIndex = 0
@@ -47,7 +59,8 @@ struct EditFlowView: View {
 
     private let swipeThreshold: CGFloat = 60
 
-    private var post: [PhotoScore] { sessionStore.post }
+    private var isScoped: Bool { scopedTo != nil }
+    private var post: [PhotoScore] { scopedTo.map { [$0] } ?? sessionStore.post }
     private var currentScore: PhotoScore? {
         guard post.indices.contains(currentIndex) else { return nil }
         return post[currentIndex]
@@ -68,7 +81,9 @@ struct EditFlowView: View {
                         headlineBlock
                         photoStage(photo: currentPhoto, score: currentScore)
                         pillRow
-                        utilityRow
+                        if !isScoped {
+                            utilityRow
+                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
@@ -96,19 +111,23 @@ struct EditFlowView: View {
     private var topBar: some View {
         HStack {
             Button {
-                goBack()
+                if isScoped {
+                    dismiss()
+                } else {
+                    goBack()
+                }
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: isScoped ? "xmark" : "chevron.left")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Color(hex: "171614"))
                     .frame(width: 44, height: 44)
             }
-            .disabled(currentIndex == 0)
-            .opacity(currentIndex == 0 ? 0.3 : 1)
+            .disabled(!isScoped && currentIndex == 0)
+            .opacity(!isScoped && currentIndex == 0 ? 0.3 : 1)
 
             Spacer()
 
-            if !post.isEmpty {
+            if !isScoped, !post.isEmpty {
                 Text("\(min(currentIndex + 1, post.count)) of \(post.count)")
                     .font(.duvroLabel)
                     .foregroundStyle(Color(hex: "777169"))

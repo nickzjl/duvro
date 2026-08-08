@@ -44,27 +44,39 @@ enum DebugLaunch {
 }
 
 /// Builds the DebugFixture into a fresh SessionStore and shows the
-/// requested screen. `finalReview` still falls back to ShortlistDebugView
-/// until the Phase 6 commit swaps it in. If golden_hour.json itself fails
-/// to load, falls back the same way -- the launch path stays verifiable on
-/// its own even if a downstream pack/asset is broken.
+/// requested screen. `editFlow`'s "keep this one" on the last photo
+/// navigates on into the real Final Review screen (EditFlowView.onComplete),
+/// matching the real app's one-way Phase 5 -> Phase 6 flow (UI_NOTES §3: no
+/// "take another look" branch back). Falls back to ShortlistDebugView if
+/// golden_hour.json itself fails to load -- the launch path stays
+/// verifiable on its own even if a downstream pack/asset is broken.
 struct DebugLaunchRootView: View {
     let screen: DebugLaunchScreen
     @State private var sessionStore = SessionStore()
     @State private var loaded = false
+    /// editFlow starts in Phase 5; reaching the end of the post navigates
+    /// forward into Phase 6, one-way, same as the real flow would.
+    @State private var showFinalReview = false
 
     var body: some View {
         Group {
             if loaded, let shortlist = sessionStore.shortlist {
-                switch screen {
-                case .editFlow:
-                    if case .success(let pack) = VibePackLoader.load(named: "golden_hour") {
-                        EditFlowView(sessionStore: sessionStore, pack: pack, onComplete: {})
-                    } else {
-                        fallback(shortlist)
+                if case .success(let pack) = VibePackLoader.load(named: "golden_hour") {
+                    switch screen {
+                    case .editFlow:
+                        if showFinalReview {
+                            FinalReviewView(sessionStore: sessionStore, pack: pack, onContinue: {})
+                        } else {
+                            EditFlowView(sessionStore: sessionStore, pack: pack) {
+                                let updated = RunnerUpService.compute(shortlist: shortlist, chosen: sessionStore.post)
+                                sessionStore.setRunnerUps(updated)
+                                showFinalReview = true
+                            }
+                        }
+                    case .finalReview:
+                        FinalReviewView(sessionStore: sessionStore, pack: pack, onContinue: {})
                     }
-                case .finalReview:
-                    // Swapped for the real Phase 6 screen in that commit.
+                } else {
                     fallback(shortlist)
                 }
             } else {
