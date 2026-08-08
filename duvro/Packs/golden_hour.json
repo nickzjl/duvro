@@ -1,0 +1,61 @@
+{
+  "_note": "UNTUNED. Rough, plausible starting parameters only -- nobody has seen these rendered yet. Do not treat as final; see BUILD_ROADMAP's Deferred work register (\"Golden Hour filter tuning\"). Values will be replaced from rendered output on a real device.",
+  "id": "golden_hour",
+  "displayName": "Golden Hour",
+  "variants": [
+    {
+      "name": "Sun-kissed",
+      "ops": [
+        { "type": "temperatureTint", "temperature": 5200, "tint": 6 },
+        { "type": "toneCurve", "points": [
+          { "x": 0,    "y": 0.02 },
+          { "x": 0.25, "y": 0.24 },
+          { "x": 0.5,  "y": 0.54 },
+          { "x": 0.75, "y": 0.82 },
+          { "x": 1,    "y": 0.99 }
+        ] },
+        { "type": "colorControls", "saturation": 1.25, "brightness": 0.02, "contrast": 1.08 },
+        { "type": "vignette", "intensity": 0.25, "radius": 1.4 },
+        { "type": "bloom", "radius": 8, "intensity": 0.35 },
+        { "type": "grain", "intensity": 0.04, "size": 1.0 },
+        { "type": "fade", "amount": 0.05 }
+      ]
+    },
+    {
+      "name": "Warm Film",
+      "ops": [
+        { "type": "temperatureTint", "temperature": 5000, "tint": 8 },
+        { "type": "toneCurve", "points": [
+          { "x": 0,    "y": 0.06 },
+          { "x": 0.25, "y": 0.26 },
+          { "x": 0.5,  "y": 0.52 },
+          { "x": 0.75, "y": 0.76 },
+          { "x": 1,    "y": 0.95 }
+        ] },
+        { "type": "colorControls", "saturation": 0.9, "brightness": 0.0, "contrast": 0.95 },
+        { "type": "vignette", "intensity": 0.35, "radius": 1.2 },
+        { "type": "bloom", "radius": 5, "intensity": 0.15 },
+        { "type": "grain", "intensity": 0.10, "size": 1.3 },
+        { "type": "fade", "amount": 0.18 }
+      ]
+    },
+    {
+      "name": "Soft Glow",
+      "ops": [
+        { "type": "temperatureTint", "temperature": 5600, "tint": 3 },
+        { "type": "toneCurve", "points": [
+          { "x": 0,    "y": 0.08 },
+          { "x": 0.25, "y": 0.30 },
+          { "x": 0.5,  "y": 0.55 },
+          { "x": 0.75, "y": 0.78 },
+          { "x": 1,    "y": 0.94 }
+        ] },
+        { "type": "colorControls", "saturation": 1.0, "brightness": 0.06, "contrast": 0.88 },
+        { "type": "vignette", "intensity": 0.12, "radius": 1.6 },
+        { "type": "bloom", "radius": 14, "intensity": 0.55 },
+        { "type": "grain", "intensity": 0.02, "size": 0.8 },
+        { "type": "fade", "amount": 0.12 }
+      ]
+    }
+  ]
+}
