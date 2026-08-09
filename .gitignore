@@ -51,7 +51,11 @@ iOSInjectionProject/
 .DS_Store
 
 # Debug-only fixture photos (real, identifiable personal photos -- see
-# duvro/Support/DebugFixture.swift). Deliberately kept out of the Xcode
-# project's synchronized duvro/ folder so they can never end up in any app
-# bundle, and out of git so they never end up in the repo's history either.
-/DebugAssets/
+# duvro/Support/DebugFixture.swift). Live inside duvro/DebugAssets/ so
+# they're real bundle resources Bundle.main can load (an external absolute
+# path doesn't work from inside the app sandbox, on-device or in the
+# Simulator) -- EXCLUDED_SOURCE_FILE_NAMES on the Release build
+# configuration keeps them out of release bundles, NOT this gitignore entry.
+# This entry's only job is keeping them out of git, since they're real,
+# identifiable personal photos that must never enter the repo's history.
+/duvro/DebugAssets/
