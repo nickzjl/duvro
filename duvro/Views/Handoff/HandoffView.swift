@@ -99,16 +99,47 @@ struct HandoffView: View {
 
     // MARK: - In progress (idle / requestingPermission / exporting)
 
+    /// Unlike curation (indeterminate by design -- the network call's
+    /// duration genuinely isn't knowable up front), export has a KNOWN
+    /// denominator the moment `items` exists: the photo count.
+    /// requestingPermission is still indeterminate (waiting on the user,
+    /// not measurable), but once rendering actually starts, this shows a
+    /// real determinate bar plus "N of M" -- not a spinner that looks
+    /// identical whether 1 or 6 of 7 photos are done. Seven full-res
+    /// renders is a long enough wait that a non-moving spinner reads as
+    /// broken.
     private var progressState: some View {
         VStack(spacing: 16) {
-            ProgressView()
-            Text(exportService.isExporting ? "saving your photos…" : "getting ready…")
-                .font(.duvroSubheadline)
-                .foregroundStyle(Color(hex: "777169"))
-            if exportService.totalCount > 0 {
+            switch exportService.phase {
+            case .exporting where exportService.totalCount > 0:
+                // Ink black, not terracotta -- UI_NOTES §1 reserves
+                // terracotta for selected states, helper notes, and pack
+                // variant names specifically; a progress bar isn't one of
+                // those, and "leave colors alone" means not inventing a
+                // new use for the accent color either.
+                ProgressView(
+                    value: Double(exportService.exportedCount),
+                    total: Double(exportService.totalCount)
+                )
+                .progressViewStyle(.linear)
+                .tint(Color(hex: "171614"))
+                .frame(width: 160)
+                Text("saving your photos…")
+                    .font(.duvroSubheadline)
+                    .foregroundStyle(Color(hex: "777169"))
                 Text("\(exportService.exportedCount) of \(exportService.totalCount)")
                     .font(.duvroCaption)
                     .foregroundStyle(Color(hex: "A7A097"))
+            case .requestingPermission:
+                ProgressView()
+                Text("waiting for permission…")
+                    .font(.duvroSubheadline)
+                    .foregroundStyle(Color(hex: "777169"))
+            default:
+                ProgressView()
+                Text("getting ready…")
+                    .font(.duvroSubheadline)
+                    .foregroundStyle(Color(hex: "777169"))
             }
         }
         .padding(.horizontal, 40)
