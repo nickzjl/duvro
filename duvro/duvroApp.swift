@@ -57,6 +57,11 @@ struct DebugLaunchRootView: View {
     /// editFlow starts in Phase 5; reaching the end of the post navigates
     /// forward into Phase 6, one-way, same as the real flow would.
     @State private var showFinalReview = false
+    /// Phase 6 -> Phase 7, one-way, same reasoning. Phase 9's caption
+    /// screen belongs BETWEEN Final Review and Handoff -- this phase
+    /// explicitly skips straight past it (SCOPE, per instruction); this
+    /// flag is where that screen will insert itself once it exists.
+    @State private var showHandoff = false
 
     var body: some View {
         Group {
@@ -64,8 +69,17 @@ struct DebugLaunchRootView: View {
                 if case .success(let pack) = VibePackLoader.load(named: "golden_hour") {
                     switch screen {
                     case .editFlow:
-                        if showFinalReview {
-                            FinalReviewView(sessionStore: sessionStore, pack: pack, onContinue: {})
+                        if showHandoff {
+                            HandoffView(sessionStore: sessionStore, pack: pack)
+                        } else if showFinalReview {
+                            FinalReviewView(sessionStore: sessionStore, pack: pack) {
+                                // PHASE 9 INSERTION POINT: once the caption
+                                // screen exists, it goes here instead of
+                                // jumping straight to Handoff -- Final Review
+                                // -> Caption -> Handoff, per prd.md §4's
+                                // canonical step order (9 then 10).
+                                showHandoff = true
+                            }
                         } else {
                             EditFlowView(sessionStore: sessionStore, pack: pack) {
                                 // NOT a RunnerUpService.compute() recompute --
@@ -83,7 +97,14 @@ struct DebugLaunchRootView: View {
                             }
                         }
                     case .finalReview:
-                        FinalReviewView(sessionStore: sessionStore, pack: pack, onContinue: {})
+                        if showHandoff {
+                            HandoffView(sessionStore: sessionStore, pack: pack)
+                        } else {
+                            FinalReviewView(sessionStore: sessionStore, pack: pack) {
+                                // Same Phase 9 insertion point as above.
+                                showHandoff = true
+                            }
+                        }
                     }
                 } else {
                     fallback(shortlist)

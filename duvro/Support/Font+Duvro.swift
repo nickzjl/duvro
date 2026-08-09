@@ -65,6 +65,14 @@ extension Font {
         .custom("Inter-Medium", size: 15, relativeTo: .subheadline)
     }
 
+    /// Handoff screen step titles ("saved to duvro album" etc.) only.
+    /// UI_NOTES §6: the mockup sets these in a ~13pt serif, which sits
+    /// below the 20pt Newsreader floor (§1) -- same weight (Medium), same
+    /// approximate size, corrected to Inter.
+    static var duvroStepTitle: Font {
+        .custom("Inter-Medium", size: 13, relativeTo: .subheadline)
+    }
+
     /// Vibe Pack VARIANT name (e.g. "sun-kissed"), rendered in the terracotta
     /// accent color at the call site -- never Newsreader, per the 20pt floor.
     static var duvroVariantLabel: Font {

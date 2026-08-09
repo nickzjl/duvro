@@ -30,6 +30,11 @@ struct ImportView: View {
     /// are additions, not replacements.
     @State private var showEditFlowDebug = false
     @State private var showFinalReviewDebug = false
+    /// Phase 6 -> Phase 7. Phase 9's caption screen belongs BETWEEN Final
+    /// Review and Handoff -- this phase explicitly skips straight past it
+    /// (SCOPE, per instruction); this flag is where that screen will
+    /// insert itself once it exists.
+    @State private var showHandoffDebug = false
     @State private var loadedPack: VibePack?
     @State private var packLoadError: VibePackLoadError?
     #endif
@@ -121,7 +126,21 @@ struct ImportView: View {
         }
         .fullScreenCover(isPresented: $showFinalReviewDebug) {
             debugFlowDestination {
-                FinalReviewView(sessionStore: sessionStore, pack: $0, onContinue: {})
+                FinalReviewView(sessionStore: sessionStore, pack: $0) {
+                    // PHASE 9 INSERTION POINT: once the caption screen
+                    // exists, it goes here instead of jumping straight to
+                    // Handoff -- Final Review -> Caption -> Handoff, per
+                    // prd.md §4's canonical step order (9 then 10). For
+                    // this phase, "add a caption" skips straight to
+                    // Handoff (SCOPE, per instruction).
+                    showFinalReviewDebug = false
+                    showHandoffDebug = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showHandoffDebug) {
+            debugFlowDestination {
+                HandoffView(sessionStore: sessionStore, pack: $0)
             }
         }
         #endif
