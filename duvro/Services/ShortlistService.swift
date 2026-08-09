@@ -83,6 +83,21 @@ nonisolated enum ShortlistService {
 
         let clusters = ClusteringService.cluster(surviving)
 
+        // Diagnostic, not a fix: ClusteringService.cluster assigns a
+        // clusterID to every item it's given, unconditionally -- a missing
+        // entry here should be structurally impossible. If this ever
+        // prints, something upstream is passing `surviving` through a
+        // DIFFERENT path than this function, or clusters.clusterID is
+        // getting built against a different (stale) input -- worth knowing
+        // immediately instead of discovering it as an unexplained "-1" in a
+        // debug view three steps downstream.
+        #if DEBUG
+        let missingClusterIDs = surviving.filter { clusters.clusterID[$0.id] == nil }
+        if !missingClusterIDs.isEmpty {
+            print("[shortlist] WARNING: \(missingClusterIDs.count)/\(surviving.count) surviving photos have NO clusterID after ClusteringService.cluster -- this should be impossible. clusters.clusterID has \(clusters.clusterID.count) entries.")
+        }
+        #endif
+
         var clusterCountInShortlist: [Int: Int] = [:]
         var shortlisted: [PhotoScore] = []
 
