@@ -140,7 +140,21 @@ struct FinalReviewView: View {
             }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $carouselSelectionID)
+            // aspectRatio BEFORE padding (inner, not outer): this sizes the
+            // ScrollView itself to (screen width - 40) x that-width*5/4 --
+            // i.e. the ratio is computed AFTER the page padding is already
+            // accounted for -- then padding adds the 20pt margin back
+            // around that already-correctly-sized box (UI_NOTES §1). Doing
+            // it the other way (padding then aspectRatio) sizes height off
+            // the FULL unpadded width while width itself is padded, so the
+            // photo's real box isn't 4:5 at all -- two different widths
+            // feeding one ratio calculation, which is what let the photo
+            // bleed past its padding in some scroll states: each page's
+            // width (from containerRelativeFrame, reading the ScrollView's
+            // own width) now matches exactly what carouselPage's own 4:5
+            // fill expects, with nothing left to disagree about.
             .aspectRatio(4 / 5, contentMode: .fit)
+            .padding(.horizontal, 20)
 
             pageDots
         }
@@ -152,7 +166,6 @@ struct FinalReviewView: View {
                 .aspectRatio(4 / 5, contentMode: .fill)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .padding(.horizontal, 20)
 
             Button {
                 remove(score.id)
@@ -163,7 +176,12 @@ struct FinalReviewView: View {
                     .padding(8)
                     .background(.black.opacity(0.55), in: Circle())
             }
-            .padding(.trailing, 32)
+            // Same 12pt-in-from-the-photo's-own-edge position as before --
+            // the photo no longer carries its own internal padding (the
+            // page padding moved to the ScrollView, above), so this no
+            // longer needs the extra 20pt (32 total) to land in the same
+            // visual spot.
+            .padding(.trailing, 12)
             .padding(.top, 12)
         }
     }
@@ -282,7 +300,13 @@ struct FinalReviewView: View {
             }
 
             // Persistent, always-visible + -- the mockup reveals this on
-            // hover, which doesn't exist on iOS (UI_NOTES fix 9).
+            // hover, which doesn't exist on iOS (UI_NOTES fix 9). Inset
+            // via padding, not offset -- an offset badge visually paints
+            // outside this ZStack's own reported bounds (72x90, the
+            // image's frame), and since this cell sits inside a horizontal
+            // ScrollView, the badge got clipped by the scroll view's own
+            // bounds and overlapped the row above (carouselPage's "x"
+            // button already uses the same inset-padding pattern, safely).
             Button {
                 addRunnerUp(score)
             } label: {
@@ -292,7 +316,7 @@ struct FinalReviewView: View {
                     .padding(6)
                     .background(Color(hex: "A04021"), in: Circle())
             }
-            .offset(x: 6, y: -6)
+            .padding(4)
         }
     }
 
