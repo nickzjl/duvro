@@ -46,6 +46,17 @@ final class SessionStore {
     /// Absent = not yet committed -- Phase 5 pre-selects variant 1 visually
     /// on arrival, but that's a display default, not a commit.
     private(set) var pickedVariantName: [UUID: String] = [:]
+    /// Every photo ID the user has explicitly skipped this session (Phase
+    /// 5's "skip this photo"). Permanent, unlike postOrder membership --
+    /// once removed from the post via a skip, a photo must never be
+    /// selected as a LATER skip's backfill candidate. Without this, a
+    /// skipped-then-removed photo becomes eligible again the moment it's no
+    /// longer in postOrder, and since it was likely one of the highest-
+    /// composite candidates in the shortlist (that's why it was chosen in
+    /// the first place), it tends to get immediately re-picked as the next
+    /// backfill -- producing exactly the "skip shows the same photos in a
+    /// loop" bug this field fixes. See skipPhoto below.
+    private(set) var skippedPhotoIDs: Set<UUID> = []
 
     // MARK: - Setters (Phase 1-3.5 outputs)
 
@@ -65,6 +76,7 @@ final class SessionStore {
         chosenSelection = result
         postOrder = result.selected.map(\.id)
         pickedVariantName = [:]
+        skippedPhotoIDs = []
     }
 
     func setRunnerUps(_ runnerUps: [PhotoScore]) {
@@ -102,28 +114,46 @@ final class SessionStore {
     }
 
     /// "skip this photo" (BUILD_ROADMAP Phase 5): removes `id` from the
-    /// post. Backfills with the next-best available candidate from the
-    /// shortlist remainder (ranked by composite, respecting the same
-    /// one-photo-per-cluster rule FallbackSelectionService itself uses --
-    /// duplicated narrowly here rather than reaching back into that
-    /// service, since this is "one more slot," not a full re-selection).
-    /// If nothing viable remains, the post just shrinks by one, per
-    /// BUILD_ROADMAP Phase 5's own fallback.
+    /// post and backfills, IN THE SAME SLOT, with the next-best available
+    /// candidate from the shortlist remainder (ranked by composite,
+    /// respecting the same one-photo-per-cluster rule FallbackSelectionService
+    /// itself uses -- duplicated narrowly here rather than reaching back
+    /// into that service, since this is "one more slot," not a full
+    /// re-selection). If nothing viable remains, the post just shrinks by
+    /// one, per BUILD_ROADMAP Phase 5's own fallback.
     ///
-    /// NOTE: BUILD_ROADMAP Phase 5's line for this ("next-best backfills,
-    /// keeping composition valid") predates this session's "no hardcoded
-    /// composition quotas" decision (Deferred work register). "Composition
-    /// valid" no longer means anything the code enforces -- backfill here
-    /// is composite-ranked only, matching FallbackSelectionService.
+    /// Two things this used to get wrong (found by hand-testing: repeated
+    /// skips cycled through the same photos instead of producing fresh
+    /// ones each time):
+    ///
+    /// 1. The backfill candidate was APPENDED to the end of postOrder
+    ///    rather than inserted where the skipped photo used to be. The
+    ///    caller (EditFlowView.skip) deliberately keeps `currentIndex`
+    ///    unchanged after a skip -- on the assumption the same slot now
+    ///    holds something new -- so appending to the end meant the very
+    ///    next photo shown was just whatever ALREADY occupied the next
+    ///    index (an untouched original pick, not the backfill), and the
+    ///    real backfill sat unseen at the tail until every other photo in
+    ///    the post had also been skipped past.
+    /// 2. A skipped photo was only excluded from candidacy via its CURRENT
+    ///    postOrder membership (`alreadyInPost`), which stops applying the
+    ///    instant it's removed. Skipped photos are usually high-composite
+    ///    (that's why they were chosen originally), so once removed they'd
+    ///    immediately win the `.max` below again on some LATER skip and
+    ///    get backfilled right back in -- the actual "loop" the user saw.
+    ///    skippedPhotoIDs makes a skip permanent for the rest of the
+    ///    session, independent of postOrder membership.
     func skipPhoto(_ id: UUID) {
-        postOrder.removeAll { $0 == id }
+        guard let removalIndex = postOrder.firstIndex(of: id) else { return }
+        postOrder.remove(at: removalIndex)
         pickedVariantName[id] = nil
+        skippedPhotoIDs.insert(id)
 
         guard let shortlist else { return }
         let usedClusterIDs = Set(postOrder.compactMap { shortlist.clusterID[$0] })
         let alreadyInPost = Set(postOrder)
         let candidate = shortlist.shortlisted
-            .filter { !alreadyInPost.contains($0.id) && $0.id != id }
+            .filter { !alreadyInPost.contains($0.id) && !skippedPhotoIDs.contains($0.id) }
             .filter { score in
                 guard let clusterID = shortlist.clusterID[score.id] else { return true }
                 return !usedClusterIDs.contains(clusterID)
@@ -131,7 +161,8 @@ final class SessionStore {
             .max { $0.compositeScore < $1.compositeScore }
 
         if let candidate {
-            postOrder.append(candidate.id)
+            let insertionIndex = min(removalIndex, postOrder.count)
+            postOrder.insert(candidate.id, at: insertionIndex)
             runnerUps.removeAll { $0.id == candidate.id }
         }
     }
