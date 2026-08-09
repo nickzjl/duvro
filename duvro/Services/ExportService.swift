@@ -121,24 +121,24 @@ final class ExportService {
         #endif
     }
 
-    // MARK: - Phase 7, Task 2: request permission, find/create the album, save in order
+    // MARK: - Phase 7, Task 2: request permission, create the album, save in order
 
     static let albumName = "duvro — ready to post"
-
-    enum PhotosError: Error {
-        case albumCreationFailed
-    }
 
     /// The ONE entry point HandoffView calls. Requests add-only Photos
     /// permission (prd.md §4 step 10 / BUILD_ROADMAP Phase 7: "the first
     /// and only time the app asks" -- this app never asks for read access,
-    /// PHPicker never required it), finds or creates "duvro — ready to
-    /// post", then renders and saves `items` via renderAll above, staggering
-    /// each asset's creationDate 1 SECOND APART with the FIRST item newest
-    /// -- Instagram's own picker sorts most-recent-first, so that's what
-    /// actually controls the order photos appear there (prd.md §7). Dates
-    /// are anchored to `Date()` at call time, not backdated, so the photos
-    /// don't bury themselves somewhere back in the user's camera roll.
+    /// PHPicker never required it), renders `items` via renderAll above,
+    /// then saves everything into a freshly created "duvro — ready to
+    /// post" album in ONE PHPhotoLibrary transaction (see saveAll's doc
+    /// comment for why it can't look for an existing album first -- that
+    /// was this function's crash, on-device, fixed in this commit).
+    /// Staggers each asset's creationDate 1 SECOND APART with the FIRST
+    /// item newest -- Instagram's own picker sorts most-recent-first, so
+    /// that's what actually controls the order photos appear there
+    /// (prd.md §7). Dates are anchored to `Date()` at call time, not
+    /// backdated, so the photos don't bury themselves somewhere back in
+    /// the user's camera roll.
     func exportToPhotos(_ items: [Item]) async {
         phase = .requestingPermission
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
@@ -155,14 +155,20 @@ final class ExportService {
 
         phase = .exporting
         do {
-            let album = try await Self.findOrCreateAlbum(named: Self.albumName)
-            let referenceDate = Date()
-            try await renderAll(items) { index, data in
-                // index 0 (carousel position 1) gets the MOST RECENT date
-                // -- see the doc comment above.
-                let creationDate = referenceDate.addingTimeInterval(-Double(index))
-                try await Self.save(imageData: data, creationDate: creationDate, to: album)
+            // Rendered JPEG Data, collected in render order as renderAll
+            // produces it -- NOT decoded/rendered image buffers (the
+            // ~48MB-per-photo memory risk the previous commit's
+            // autoreleasepool guards against). A JPEG at this quality is
+            // a few MB; holding up to 20 of them (prd.md's dump-size
+            // ceiling) is on the order of tens of MB, nowhere near the
+            // decoded-buffer risk -- see saveAll's doc comment for why
+            // this collection step exists at all.
+            var rendered: [Data] = []
+            rendered.reserveCapacity(items.count)
+            try await renderAll(items) { _, data in
+                rendered.append(data)
             }
+            try await Self.saveAll(rendered, referenceDate: Date(), albumTitle: Self.albumName)
             phase = .done
         } catch {
             phase = .failed(Self.describe(error))
@@ -176,52 +182,66 @@ final class ExportService {
         await exportToPhotos(items)
     }
 
-    private nonisolated static func findOrCreateAlbum(named title: String) async throws -> PHAssetCollection {
-        let options = PHFetchOptions()
-        options.predicate = NSPredicate(format: "title = %@", title)
-        let existing = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .albumRegular, options: options)
-        if let found = existing.firstObject {
-            return found
-        }
-
-        var placeholder: PHObjectPlaceholder?
+    /// ONE PHPhotoLibrary.performChanges transaction creates "duvro —
+    /// ready to post" AND every asset in `rendered`, linking them via
+    /// placeholders entirely within that single transaction.
+    ///
+    /// NOT a style choice -- this replaces a previous version that first
+    /// tried PHAssetCollection.fetchAssetCollections(...) to find an
+    /// existing album by title before creating one, and crashed on
+    /// device immediately after the user granted permission ("attempted
+    /// to access privacy-sensitive data without a usage description...
+    /// NSPhotoLibraryUsageDescription"). PHAccessLevel.addOnly grants
+    /// ZERO read access to the library -- ANY PHFetchRequest-family call
+    /// (fetchAssetCollections, fetchAssets, even re-fetching a
+    /// collection this app JUST created by its own local identifier)
+    /// requires full-library NSPhotoLibraryUsageDescription, which this
+    /// app deliberately never declares (CLAUDE.md's privacy
+    /// architecture: add-only at export and nothing else -- the welcome
+    /// screen's privacy claim depends on it, and adding that key would
+    /// silence this crash by breaking that promise instead of fixing
+    /// the actual bug).
+    ///
+    /// The only way to reference a Photos collection WITHOUT fetching it
+    /// is the PHAssetCollectionChangeRequest object returned at the
+    /// moment it's created -- and that's only valid inside the
+    /// transaction that created it. It can't be stored and reused by a
+    /// later, separate performChanges call (which is what per-photo
+    /// transactions would need). So every asset that should land in the
+    /// album has to be created in the SAME transaction as the album
+    /// itself.
+    ///
+    /// REAL CONSEQUENCE, not a bug: this can never find and reuse an
+    /// album from a previous export -- every export creates a NEW album.
+    /// Photos permits duplicate album names, so a user who exports more
+    /// than once ends up with multiple albums all titled "duvro — ready
+    /// to post," one per export, rather than one that accumulates.
+    /// There is no fetch-free way to avoid this under add-only-only
+    /// permission; the alternative would be requesting full read/write
+    /// access, which this app deliberately does not do.
+    private nonisolated static func saveAll(_ rendered: [Data], referenceDate: Date, albumTitle: String) async throws {
         try await PHPhotoLibrary.shared().performChanges {
-            let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
-            placeholder = request.placeholderForCreatedAssetCollection
-        }
-        guard let placeholder else { throw PhotosError.albumCreationFailed }
-        let created = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [placeholder.localIdentifier], options: nil)
-        guard let album = created.firstObject else { throw PhotosError.albumCreationFailed }
-        return album
-    }
-
-    /// One performChanges transaction per photo (not one batched
-    /// transaction for the whole post): keeps this call's only live data
-    /// the ONE `imageData` it was handed, consistent with renderAll's
-    /// one-photo-at-a-time memory guarantee -- a single big transaction
-    /// would need every photo's data alive simultaneously to build it.
-    private nonisolated static func save(imageData: Data, creationDate: Date, to album: PHAssetCollection) async throws {
-        try await PHPhotoLibrary.shared().performChanges {
-            let creationRequest = PHAssetCreationRequest.forAsset()
-            let resourceOptions = PHAssetResourceCreationOptions()
-            resourceOptions.uniformTypeIdentifier = UTType.jpeg.identifier
-            creationRequest.addResource(with: .photo, data: imageData, options: resourceOptions)
-            creationRequest.creationDate = creationDate
-
-            guard
-                let albumChangeRequest = PHAssetCollectionChangeRequest(for: album),
-                let assetPlaceholder = creationRequest.placeholderForCreatedAsset
-            else { return }
-            albumChangeRequest.addAssets([assetPlaceholder] as NSArray)
+            let albumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumTitle)
+            var placeholders: [PHObjectPlaceholder] = []
+            for (index, data) in rendered.enumerated() {
+                let creationRequest = PHAssetCreationRequest.forAsset()
+                let resourceOptions = PHAssetResourceCreationOptions()
+                resourceOptions.uniformTypeIdentifier = UTType.jpeg.identifier
+                creationRequest.addResource(with: .photo, data: data, options: resourceOptions)
+                // index 0 (carousel position 1) gets the MOST RECENT date
+                // -- see exportToPhotos' doc comment.
+                creationRequest.creationDate = referenceDate.addingTimeInterval(-Double(index))
+                if let placeholder = creationRequest.placeholderForCreatedAsset {
+                    placeholders.append(placeholder)
+                }
+            }
+            albumRequest.addAssets(placeholders as NSFastEnumeration)
         }
     }
 
     private static func describe(_ error: Error) -> String {
         if let renderError = error as? RenderError, case .renderFailed(let index) = renderError {
             return "photo \(index + 1) couldn't be rendered."
-        }
-        if error is PhotosError {
-            return "couldn't create the duvro album."
         }
         return error.localizedDescription
     }
