@@ -78,6 +78,95 @@ nonisolated enum EditEngine {
         return photo.thumbnail
     }
 
+    // MARK: - Full-res export (Phase 7)
+
+    /// duvro's ONE, canonical 4:5 crop -- a centered fill-crop of `extent`
+    /// to `aspectRatio` (width/height), matching what
+    /// `Image(...).resizable().aspectRatio(4/5, contentMode: .fill).clipped()`
+    /// shows on screen everywhere else in the app (EditFlowView's photo
+    /// stage, FinalReviewView's carousel/thumbnails). SwiftUI's fill+clip
+    /// doesn't touch pixel data -- it renders the op chain at the photo's
+    /// NATIVE aspect ratio, then visually hides whatever falls outside a
+    /// centered 4:5 window. renderFullResJPEGData below reproduces that
+    /// exact behavior at the pixel level (crop AFTER the op chain, not
+    /// before -- see its comment) specifically so export matches preview
+    /// pixel-for-pixel, not just approximately (Phase 6 acceptance:
+    /// "preview matches final export 1:1"). If anything else in this app
+    /// ever needs a literal pixel crop instead of a view-level visual one,
+    /// it should call this same function rather than re-deriving the math.
+    static func centerCropRect(for extent: CGRect, aspectRatio: CGFloat) -> CGRect {
+        guard extent.width > 0, extent.height > 0, aspectRatio > 0 else { return extent }
+        let sourceAspect = extent.width / extent.height
+        var cropWidth = extent.width
+        var cropHeight = extent.height
+        if sourceAspect > aspectRatio {
+            // Source is relatively WIDER than 4:5 -- crop the sides, keep full height.
+            cropWidth = extent.height * aspectRatio
+        } else {
+            // Source is relatively TALLER than 4:5 -- crop top/bottom, keep full width.
+            cropHeight = extent.width / aspectRatio
+        }
+        let x = extent.origin.x + (extent.width - cropWidth) / 2
+        let y = extent.origin.y + (extent.height - cropHeight) / 2
+        return CGRect(x: x, y: y, width: cropWidth, height: cropHeight)
+    }
+
+    /// Full-res JPEG render for export -- ExportService's per-photo unit of
+    /// work. Loads from `photo.originalURL` (the full-resolution PHPicker
+    /// copy), NOT `downsampledURL` (the <=1280px preview source `render`
+    /// above uses). Encodes straight from CIImage to JPEG Data via the
+    /// shared CIContext, skipping an intermediate CGImage/UIImage
+    /// materialization -- one less full-res buffer alive at a time, which
+    /// matters here specifically (a 12MP original is ~48MB decoded; this
+    /// function's caller is expected to run this inside an
+    /// autoreleasepool, one photo at a time -- see ExportService).
+    ///
+    /// Crops AFTER the op chain runs, not before: vignette/bloom/grain
+    /// ops compute relative to whatever extent they're handed, and the
+    /// in-app PREVIEW (`render` above) always hands them the photo's full,
+    /// UNCROPPED native extent -- the crop only happens visually, after
+    /// the fact, at the SwiftUI view layer. Cropping the source first
+    /// would make a full-res vignette/grain look different from the
+    /// preview's (wrong center, wrong apparent radius). Running the op
+    /// chain on the full extent and cropping the RESULT reproduces the
+    /// preview's actual pixels, per centerCropRect's doc comment.
+    ///
+    /// Never throws -- returns nil on any failure (unreadable original,
+    /// full chain fails to render even after EditEngine's own per-op
+    /// fail-safe, or JPEG encoding fails) so ExportService can surface a
+    /// clear per-photo failure instead of silently exporting a placeholder
+    /// or crashing mid-export.
+    static func renderFullResJPEGData(photo: Photo, variant: EditVariant, compressionQuality: CGFloat = 0.9) -> Data? {
+        guard let sourceCIImage = CIImage(contentsOf: photo.originalURL) else { return nil }
+
+        var image = sourceCIImage
+        for op in variant.ops {
+            image = apply(op, to: image) ?? image // same per-op fail-safe as the preview path
+        }
+
+        let cropRect = centerCropRect(for: sourceCIImage.extent, aspectRatio: 4.0 / 5.0)
+        let cropped = image.cropped(to: cropRect)
+
+        let colorSpace = cropped.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        if let data = try? sharedContext.jpegRepresentation(
+            of: cropped,
+            colorSpace: colorSpace,
+            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: compressionQuality]
+        ) {
+            return data
+        }
+
+        // Full chain (or the crop itself) failed to encode -- try the
+        // unedited, cropped source before giving up, matching `render`'s
+        // own fallback-toward-original spirit.
+        let croppedSource = sourceCIImage.cropped(to: cropRect)
+        return try? sharedContext.jpegRepresentation(
+            of: croppedSource,
+            colorSpace: colorSpace,
+            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: compressionQuality]
+        )
+    }
+
     // MARK: - Op -> CIFilter
 
     private static func apply(_ op: EditOp, to image: CIImage) -> CIImage? {
