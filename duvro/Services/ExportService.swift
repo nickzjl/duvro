@@ -132,14 +132,33 @@ final class ExportService {
     /// then saves everything into a freshly created "duvro — ready to
     /// post" album in ONE PHPhotoLibrary transaction (see saveAll's doc
     /// comment for why it can't look for an existing album first -- that
-    /// was this function's crash, on-device, fixed in this commit).
+    /// was this function's crash, on-device, fixed in a previous commit).
     /// Staggers each asset's creationDate 1 SECOND APART with the FIRST
     /// item newest -- Instagram's own picker sorts most-recent-first, so
     /// that's what actually controls the order photos appear there
     /// (prd.md §7). Dates are anchored to `Date()` at call time, not
     /// backdated, so the photos don't bury themselves somewhere back in
     /// the user's camera roll.
-    func exportToPhotos(_ items: [Item]) async {
+    ///
+    /// `expectedCount` is HandoffView's sessionStore.post.count -- the
+    /// number of photos the user actually chose. `items` is built via a
+    /// compactMap over that post (HandoffView.items) that silently drops
+    /// any entry whose photo or variant can't be resolved; without this
+    /// check, a resolution failure for even one photo would export
+    /// fewer photos than the user expects while still landing on
+    /// `.done` -- a quieter version of the exact silent-failure class
+    /// this audit is about, even though it isn't caused by a thrown
+    /// error at all. `items.isEmpty` is the same failure taken to its
+    /// extreme (every photo failed to resolve, or the caller passed
+    /// nothing) and is folded into the same check rather than treated
+    /// as a separate case, since both mean the same thing: what's about
+    /// to be exported doesn't match what the user chose.
+    func exportToPhotos(_ items: [Item], expectedCount: Int) async {
+        guard !items.isEmpty, items.count == expectedCount else {
+            phase = .failed("some of your photos couldn't be prepared for export.")
+            return
+        }
+
         phase = .requestingPermission
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized else {
@@ -178,8 +197,8 @@ final class ExportService {
     /// Re-runs the same export after a `.failed` state (e.g. a transient
     /// Photos-library error) without re-prompting for permission, which is
     /// already granted at that point.
-    func retry(_ items: [Item]) async {
-        await exportToPhotos(items)
+    func retry(_ items: [Item], expectedCount: Int) async {
+        await exportToPhotos(items, expectedCount: expectedCount)
     }
 
     /// ONE PHPhotoLibrary.performChanges transaction creates "duvro —

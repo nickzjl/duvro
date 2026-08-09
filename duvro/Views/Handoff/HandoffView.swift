@@ -64,7 +64,7 @@ struct HandoffView: View {
         .overlay(alignment: .top) { if showToast { toast } }
         .task {
             renderStripPreviews()
-            await exportService.exportToPhotos(items)
+            await exportService.exportToPhotos(items, expectedCount: sessionStore.post.count)
         }
         .onChange(of: exportService.phase) { _, newPhase in
             guard newPhase == .done else { return }
@@ -162,7 +162,7 @@ struct HandoffView: View {
                 .foregroundStyle(Color(hex: "777169"))
                 .multilineTextAlignment(.center)
             Button {
-                Task { await exportService.retry(items) }
+                Task { await exportService.retry(items, expectedCount: sessionStore.post.count) }
             } label: {
                 Text("try again")
                     .font(.duvroButton)
