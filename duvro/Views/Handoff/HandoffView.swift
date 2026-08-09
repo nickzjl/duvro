@@ -276,9 +276,7 @@ struct HandoffView: View {
 
     private var primaryButton: some View {
         Button {
-            // Task 4 (next commit) implements the real
-            // instagram://library -> instagram://app -> App Store
-            // fallback chain -- InstagramLauncher.open().
+            InstagramLauncher.open()
         } label: {
             Text("open instagram")
                 .font(.duvroButton)
