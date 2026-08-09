@@ -68,8 +68,17 @@ struct DebugLaunchRootView: View {
                             FinalReviewView(sessionStore: sessionStore, pack: pack, onContinue: {})
                         } else {
                             EditFlowView(sessionStore: sessionStore, pack: pack) {
-                                let updated = RunnerUpService.compute(shortlist: shortlist, chosen: sessionStore.post)
-                                sessionStore.setRunnerUps(updated)
+                                // NOT a RunnerUpService.compute() recompute --
+                                // runnerUps is computed ONCE (below, in .task)
+                                // and mutated incrementally by every skip
+                                // since (SessionStore.skipPhoto promotes
+                                // directly from it, removing what it takes).
+                                // Recomputing here would re-derive fresh
+                                // candidates from the shortlist remainder and
+                                // break the "post.count + runnerUps.count is
+                                // the whole bounded universe" invariant that's
+                                // the entire point of that design -- see
+                                // skipPhoto's doc comment.
                                 showFinalReview = true
                             }
                         }

@@ -46,17 +46,6 @@ final class SessionStore {
     /// Absent = not yet committed -- Phase 5 pre-selects variant 1 visually
     /// on arrival, but that's a display default, not a commit.
     private(set) var pickedVariantName: [UUID: String] = [:]
-    /// Every photo ID the user has explicitly skipped this session (Phase
-    /// 5's "skip this photo"). Permanent, unlike postOrder membership --
-    /// once removed from the post via a skip, a photo must never be
-    /// selected as a LATER skip's backfill candidate. Without this, a
-    /// skipped-then-removed photo becomes eligible again the moment it's no
-    /// longer in postOrder, and since it was likely one of the highest-
-    /// composite candidates in the shortlist (that's why it was chosen in
-    /// the first place), it tends to get immediately re-picked as the next
-    /// backfill -- producing exactly the "skip shows the same photos in a
-    /// loop" bug this field fixes. See skipPhoto below.
-    private(set) var skippedPhotoIDs: Set<UUID> = []
 
     // MARK: - Setters (Phase 1-3.5 outputs)
 
@@ -76,7 +65,6 @@ final class SessionStore {
         chosenSelection = result
         postOrder = result.selected.map(\.id)
         pickedVariantName = [:]
-        skippedPhotoIDs = []
     }
 
     func setRunnerUps(_ runnerUps: [PhotoScore]) {
@@ -114,75 +102,62 @@ final class SessionStore {
     }
 
     /// "skip this photo" (BUILD_ROADMAP Phase 5): removes `id` from the
-    /// post and backfills, IN THE SAME SLOT, with the next-best available
-    /// candidate from the shortlist remainder (ranked by composite,
-    /// respecting the same one-photo-per-cluster rule FallbackSelectionService
-    /// itself uses -- duplicated narrowly here rather than reaching back
-    /// into that service, since this is "one more slot," not a full
-    /// re-selection). If nothing viable remains, the post just shrinks by
-    /// one, per BUILD_ROADMAP Phase 5's own fallback.
+    /// post and, IN THE SAME SLOT (same index), immediately promotes the
+    /// best available runner-up to replace it.
     ///
-    /// Two things this used to get wrong (found by hand-testing: repeated
-    /// skips cycled through the same photos instead of producing fresh
-    /// ones each time):
+    /// SPEC, and why this is a behaviour change and not the earlier
+    /// display-only patch it was mistaken for (product decision, momentum
+    /// principle in CLAUDE.md's product thesis): the edit loop is EXACTLY
+    /// the post, and nothing else. `runnerUps` -- the SAME "what we left
+    /// out" pool Final Review shows -- is the ONLY source a skip draws
+    /// from now, not a separately re-derived slice of the shortlist
+    /// remainder (which is what the previous version of this function
+    /// did, and which is how a skip could reach photos the user never saw
+    /// offered anywhere). Sourcing from `runnerUps` directly makes three
+    /// things true by construction, not by separately-tracked bookkeeping:
+    ///   - the total universe a user can ever be asked to edit is bounded
+    ///     -- post.count + runnerUps.count (e.g. 7 + 5 = 12 candidates
+    ///     that could ever appear, not an unbounded walk through however
+    ///     large the shortlist remainder happens to be)
+    ///   - a promoted runner-up leaves the pool it came from automatically
+    ///     (removeFirst() takes it OUT of runnerUps) -- it can't also
+    ///     still show up in Final Review's "what we left out" row
+    ///   - once runnerUps is empty, a skip has nothing left to offer and
+    ///     the post genuinely, permanently shrinks -- the denominator
+    ///     drops with it, since the loop IS the post ("3 of 7" means
+    ///     exactly what it says, always)
     ///
-    /// 1. The backfill candidate was APPENDED to the end of postOrder
-    ///    rather than inserted where the skipped photo used to be. The
-    ///    caller (EditFlowView.skip) deliberately keeps `currentIndex`
-    ///    unchanged after a skip -- on the assumption the same slot now
-    ///    holds something new -- so appending to the end meant the very
-    ///    next photo shown was just whatever ALREADY occupied the next
-    ///    index (an untouched original pick, not the backfill), and the
-    ///    real backfill sat unseen at the tail until every other photo in
-    ///    the post had also been skipped past.
-    /// 2. A skipped photo was only excluded from candidacy via its CURRENT
-    ///    postOrder membership (`alreadyInPost`), which stops applying the
-    ///    instant it's removed. Skipped photos are usually high-composite
-    ///    (that's why they were chosen originally), so once removed they'd
-    ///    immediately win the `.max` below again on some LATER skip and
-    ///    get backfilled right back in -- the actual "loop" the user saw.
-    ///    skippedPhotoIDs makes a skip permanent for the rest of the
-    ///    session, independent of postOrder membership.
+    /// No cluster-uniqueness check needed here, unlike the previous
+    /// version: RunnerUpService.compute already guarantees runnerUps is
+    /// cluster-disjoint from `chosen` AND from itself at the moment it's
+    /// computed -- ONCE, at selection time (see the callers, which no
+    /// longer recompute it after skips; recomputing would pull in fresh
+    /// shortlist-remainder candidates and break the bounded-12 invariant
+    /// above). Every mutation from here on -- this function's promotion,
+    /// or addRunnerUp/removeFromPost in Phase 6 -- only ever MOVES a
+    /// photo between postOrder and runnerUps, or removes one outright; it
+    /// never introduces a new photo into either set, so that initial
+    /// disjointness holds for the life of the session without re-checking
+    /// it here. `runnerUps` stays composite-sorted best-first throughout
+    /// (removing elements doesn't reorder what's left), so "the best
+    /// available runner-up" is simply its first element.
     func skipPhoto(_ id: UUID) {
         guard let removalIndex = postOrder.firstIndex(of: id) else { return }
         postOrder.remove(at: removalIndex)
         pickedVariantName[id] = nil
-        skippedPhotoIDs.insert(id)
 
-        guard let shortlist else { return }
-        let usedClusterIDs = Set(postOrder.compactMap { shortlist.clusterID[$0] })
-        let alreadyInPost = Set(postOrder)
-        let candidate = shortlist.shortlisted
-            .filter { !alreadyInPost.contains($0.id) && !skippedPhotoIDs.contains($0.id) }
-            .filter { score in
-                guard let clusterID = shortlist.clusterID[score.id] else { return true }
-                return !usedClusterIDs.contains(clusterID)
-            }
-            .max { $0.compositeScore < $1.compositeScore }
-
-        if let candidate {
+        let promoted = runnerUps.isEmpty ? nil : runnerUps.removeFirst()
+        if let promoted {
             let insertionIndex = min(removalIndex, postOrder.count)
-            postOrder.insert(candidate.id, at: insertionIndex)
-            runnerUps.removeAll { $0.id == candidate.id }
+            postOrder.insert(promoted.id, at: insertionIndex)
         }
 
-        // Diagnostic, not a fix: re-verified this function's insert-at-index
-        // math by hand and found it correct (removalIndex captured before
-        // the removal, candidate inserted at that same index, not appended)
-        // -- reported on-device symptoms ("backfills only appear after 7
-        // taps," "denominator frozen at the original count") match the
-        // PRE-fix append-only behavior exactly, which this source no longer
-        // contains. This print exists to settle, from the Xcode console on
-        // the next on-device test, whether that's a stale install (this
-        // line will show the correct in-place index every time) or a real
-        // bug still eluding code review (this line will show something
-        // unexpected -- e.g. insertionIndex landing at the end, or the same
-        // photo ID recurring). Pairs with the print in
-        // EditFlowView.enterPhoto, which reports what the SCREEN is
-        // actually showing for the same skip -- if this one is correct but
-        // that one isn't, the bug is in rendering, not here.
+        // Diagnostic: confirms the invariant from the console on the next
+        // on-device test -- postOrder.count should never exceed
+        // chosenSelection.selected.count, and runnerUps.count should only
+        // ever go down, never back up, across a whole skip session.
         #if DEBUG
-        print("[skip] removed \(id.uuidString.prefix(8)) from postOrder[\(removalIndex)] -- backfill: \(candidate.map { String($0.id.uuidString.prefix(8)) } ?? "NONE, post shrinks to \(postOrder.count)"), postOrder now: \(postOrder.map { String($0.uuidString.prefix(4)) })")
+        print("[skip] removed \(id.uuidString.prefix(8)) from postOrder[\(removalIndex)] -- \(promoted.map { "promoted \(String($0.id.uuidString.prefix(8))) from runnerUps" } ?? "no runner-ups left, post shrinks to \(postOrder.count)"); postOrder now \(postOrder.count): \(postOrder.map { String($0.uuidString.prefix(4)) }), runnerUps remaining: \(runnerUps.count)")
         #endif
     }
 

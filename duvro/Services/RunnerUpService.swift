@@ -34,10 +34,19 @@ nonisolated enum RunnerUpService {
     /// adaptive count behaves.
     static let closenessThreshold: Double = 0.15
 
-    /// `chosen` is the CURRENT post (SessionStore.post), not
-    /// chosenSelection.selected -- skips during Phase 5 change what's
-    /// "chosen," and runner-ups should reflect that, not the original
-    /// proposal.
+    /// Called exactly ONCE per session, right after FallbackSelectionService
+    /// (or the curation call) produces the initial post -- `chosen` should
+    /// be that initial `FallbackSelectionResult.selected`, not a
+    /// later/live SessionStore.post. This is a deliberate reversal of an
+    /// earlier version of this comment, which said the opposite: after a
+    /// product decision (momentum principle, CLAUDE.md), skips no longer
+    /// trigger a recompute here. SessionStore.skipPhoto instead promotes
+    /// directly out of the `runnerUps` array this call produces, so the
+    /// pool only ever shrinks from here -- recomputing after a skip would
+    /// pull in fresh shortlist-remainder candidates the user was never
+    /// shown, breaking the "post.count + runnerUps.count is the whole
+    /// bounded universe a user can ever be asked to edit" invariant. See
+    /// SessionStore.skipPhoto's doc comment for the full reasoning.
     static func compute(shortlist: ShortlistResult, chosen: [PhotoScore]) -> [PhotoScore] {
         guard !chosen.isEmpty else { return [] }
         let lowestChosenComposite = Double(chosen.map(\.compositeScore).min() ?? 0)
