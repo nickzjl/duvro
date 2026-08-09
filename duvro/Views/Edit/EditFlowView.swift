@@ -316,6 +316,20 @@ struct EditFlowView: View {
         currentHeadline = Self.headline(for: currentScore.category, excluding: usedHeadlines)
         usedHeadlines.insert(currentHeadline)
 
+        // Diagnostic, not a fix: pairs with the print in
+        // SessionStore.skipPhoto -- that one reports what the DATA layer
+        // computed for a given skip; this one reports what this SCREEN is
+        // actually about to display for the same skip (this fires right
+        // after skip() calls sessionStore.skipPhoto then enterPhoto). If
+        // the two disagree -- e.g. skipPhoto logs a fresh backfill ID but
+        // this logs the SAME currentScore.id as a prior entry -- the bug is
+        // in this view's rendering, not the data. If they agree and still
+        // don't match what's on screen, the running binary predates the
+        // source currently in the repo.
+        #if DEBUG
+        print("[edit-flow] currentIndex=\(currentIndex), post.count=\(post.count), showing \(currentScore.id.uuidString.prefix(8))")
+        #endif
+
         let currentID = currentScore.id
         let nextID = nextScore?.id
         Task {

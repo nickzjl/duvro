@@ -165,6 +165,25 @@ final class SessionStore {
             postOrder.insert(candidate.id, at: insertionIndex)
             runnerUps.removeAll { $0.id == candidate.id }
         }
+
+        // Diagnostic, not a fix: re-verified this function's insert-at-index
+        // math by hand and found it correct (removalIndex captured before
+        // the removal, candidate inserted at that same index, not appended)
+        // -- reported on-device symptoms ("backfills only appear after 7
+        // taps," "denominator frozen at the original count") match the
+        // PRE-fix append-only behavior exactly, which this source no longer
+        // contains. This print exists to settle, from the Xcode console on
+        // the next on-device test, whether that's a stale install (this
+        // line will show the correct in-place index every time) or a real
+        // bug still eluding code review (this line will show something
+        // unexpected -- e.g. insertionIndex landing at the end, or the same
+        // photo ID recurring). Pairs with the print in
+        // EditFlowView.enterPhoto, which reports what the SCREEN is
+        // actually showing for the same skip -- if this one is correct but
+        // that one isn't, the bug is in rendering, not here.
+        #if DEBUG
+        print("[skip] removed \(id.uuidString.prefix(8)) from postOrder[\(removalIndex)] -- backfill: \(candidate.map { String($0.id.uuidString.prefix(8)) } ?? "NONE, post shrinks to \(postOrder.count)"), postOrder now: \(postOrder.map { String($0.uuidString.prefix(4)) })")
+        #endif
     }
 
     // MARK: - Phase 6: reorder / remove / add runner-up
