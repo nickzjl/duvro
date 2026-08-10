@@ -121,24 +121,54 @@ final class ExportService {
         #endif
     }
 
-    // MARK: - Phase 7, Task 2: request permission, create the album, save in order
+    // MARK: - Phase 7, Task 2: request permission, save in order
 
-    static let albumName = "duvro — ready to post"
+    /// ============================================================
+    /// DIAGNOSTIC BUILD -- NOT the final architecture. Read before
+    /// touching this section again.
+    /// ============================================================
+    /// The crash ("attempted to access privacy-sensitive data...
+    /// NSPhotoLibraryUsageDescription") persisted on a fresh install
+    /// after the fetch-removal fix, with every other Photos read call
+    /// (PHFetchResult/PHFetchOptions/PHAsset/PHImageManager/
+    /// PHCachingImageManager) and every legacy no-access-level
+    /// authorization form grepped and confirmed absent from the whole
+    /// app (not just this file). The only remaining Photos-write
+    /// surface was album creation -- PHAssetCollectionChangeRequest.
+    /// creationRequestForAssetCollection(withTitle:) + addAssets --
+    /// which Apple's .addOnly documentation and sample code frame
+    /// exclusively around saving ASSETS (typically to the camera
+    /// roll), never around creating a named ALBUM (a DIFFERENT
+    /// PHObject type). This build strips album creation entirely to
+    /// isolate whether THAT specifically is what .addOnly doesn't
+    /// cover: bare PHAssetCreationRequest + addResource + creationDate,
+    /// saved straight to the camera roll, no "duvro — ready to post"
+    /// album at all.
+    ///
+    /// If this build does NOT crash on device: album creation was the
+    /// trigger, confirming .addOnly covers asset saves but not
+    /// collection creation -- the named-album requirement (prd.md §4
+    /// step 10 / BUILD_ROADMAP Phase 7) needs a product decision (drop
+    /// the album, or request broader permission) before this comes
+    /// back.
+    /// If this build ALSO crashes: album creation was never the
+    /// (whole) story, and something about bare asset creation itself
+    /// -- addResource, creationDate, or performChanges more generally
+    /// under .addOnly -- needs to be isolated next.
+    /// ============================================================
 
     /// The ONE entry point HandoffView calls. Requests add-only Photos
     /// permission (prd.md §4 step 10 / BUILD_ROADMAP Phase 7: "the first
     /// and only time the app asks" -- this app never asks for read access,
     /// PHPicker never required it), renders `items` via renderAll above,
-    /// then saves everything into a freshly created "duvro — ready to
-    /// post" album in ONE PHPhotoLibrary transaction (see saveAll's doc
-    /// comment for why it can't look for an existing album first -- that
-    /// was this function's crash, on-device, fixed in a previous commit).
-    /// Staggers each asset's creationDate 1 SECOND APART with the FIRST
-    /// item newest -- Instagram's own picker sorts most-recent-first, so
-    /// that's what actually controls the order photos appear there
-    /// (prd.md §7). Dates are anchored to `Date()` at call time, not
-    /// backdated, so the photos don't bury themselves somewhere back in
-    /// the user's camera roll.
+    /// then saves everything via saveAll (see its doc comment -- this is
+    /// currently a diagnostic build with no album). Staggers each asset's
+    /// creationDate 1 SECOND APART with the FIRST item newest --
+    /// Instagram's own picker sorts most-recent-first, so that's what
+    /// actually controls the order photos appear there (prd.md §7). Dates
+    /// are anchored to `Date()` at call time, not backdated, so the
+    /// photos don't bury themselves somewhere back in the user's camera
+    /// roll.
     ///
     /// `expectedCount` is HandoffView's sessionStore.post.count -- the
     /// number of photos the user actually chose. `items` is built via a
@@ -187,7 +217,7 @@ final class ExportService {
             try await renderAll(items) { _, data in
                 rendered.append(data)
             }
-            try await Self.saveAll(rendered, referenceDate: Date(), albumTitle: Self.albumName)
+            try await Self.saveAll(rendered, referenceDate: Date())
             phase = .done
         } catch {
             phase = .failed(Self.describe(error))
@@ -201,47 +231,15 @@ final class ExportService {
         await exportToPhotos(items, expectedCount: expectedCount)
     }
 
-    /// ONE PHPhotoLibrary.performChanges transaction creates "duvro —
-    /// ready to post" AND every asset in `rendered`, linking them via
-    /// placeholders entirely within that single transaction.
-    ///
-    /// NOT a style choice -- this replaces a previous version that first
-    /// tried PHAssetCollection.fetchAssetCollections(...) to find an
-    /// existing album by title before creating one, and crashed on
-    /// device immediately after the user granted permission ("attempted
-    /// to access privacy-sensitive data without a usage description...
-    /// NSPhotoLibraryUsageDescription"). PHAccessLevel.addOnly grants
-    /// ZERO read access to the library -- ANY PHFetchRequest-family call
-    /// (fetchAssetCollections, fetchAssets, even re-fetching a
-    /// collection this app JUST created by its own local identifier)
-    /// requires full-library NSPhotoLibraryUsageDescription, which this
-    /// app deliberately never declares (CLAUDE.md's privacy
-    /// architecture: add-only at export and nothing else -- the welcome
-    /// screen's privacy claim depends on it, and adding that key would
-    /// silence this crash by breaking that promise instead of fixing
-    /// the actual bug).
-    ///
-    /// The only way to reference a Photos collection WITHOUT fetching it
-    /// is the PHAssetCollectionChangeRequest object returned at the
-    /// moment it's created -- and that's only valid inside the
-    /// transaction that created it. It can't be stored and reused by a
-    /// later, separate performChanges call (which is what per-photo
-    /// transactions would need). So every asset that should land in the
-    /// album has to be created in the SAME transaction as the album
-    /// itself.
-    ///
-    /// REAL CONSEQUENCE, not a bug: this can never find and reuse an
-    /// album from a previous export -- every export creates a NEW album.
-    /// Photos permits duplicate album names, so a user who exports more
-    /// than once ends up with multiple albums all titled "duvro — ready
-    /// to post," one per export, rather than one that accumulates.
-    /// There is no fetch-free way to avoid this under add-only-only
-    /// permission; the alternative would be requesting full read/write
-    /// access, which this app deliberately does not do.
-    private nonisolated static func saveAll(_ rendered: [Data], referenceDate: Date, albumTitle: String) async throws {
+    /// DIAGNOSTIC BUILD -- see the block comment above exportToPhotos.
+    /// Bare asset creation only, no PHAssetCollectionChangeRequest, no
+    /// album -- saves straight to the camera roll to isolate whether
+    /// album creation specifically is what triggers the crash. This is
+    /// NOT the target architecture; the "duvro — ready to post" album is
+    /// a real product requirement (prd.md §4 step 10) that this build
+    /// temporarily drops on purpose, only to get a clean signal.
+    private nonisolated static func saveAll(_ rendered: [Data], referenceDate: Date) async throws {
         try await PHPhotoLibrary.shared().performChanges {
-            let albumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumTitle)
-            var placeholders: [PHObjectPlaceholder] = []
             for (index, data) in rendered.enumerated() {
                 let creationRequest = PHAssetCreationRequest.forAsset()
                 let resourceOptions = PHAssetResourceCreationOptions()
@@ -250,11 +248,7 @@ final class ExportService {
                 // index 0 (carousel position 1) gets the MOST RECENT date
                 // -- see exportToPhotos' doc comment.
                 creationRequest.creationDate = referenceDate.addingTimeInterval(-Double(index))
-                if let placeholder = creationRequest.placeholderForCreatedAsset {
-                    placeholders.append(placeholder)
-                }
             }
-            albumRequest.addAssets(placeholders as NSFastEnumeration)
         }
     }
 
