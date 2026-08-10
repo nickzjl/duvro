@@ -215,6 +215,59 @@ struct VibePackTests {
         #expect(points.map(\.x) == [0, 0.25, 0.5, 0.75, 1])
     }
 
+    // Phase 8, Task 2: same reasoning as goldenHourLoadsFromTheAppBundle
+    // above -- decodes the REAL shipped duvro/Packs/digicam.json, not a
+    // fixture. The incident that test's comment describes (a fixture-based
+    // test passing while the real bundled golden_hour.json failed to
+    // decode on device) is exactly the gap this guards against for the two
+    // new packs.
+    @Test func digicamLoadsFromTheAppBundle() throws {
+        let result = VibePackLoader.load(named: "digicam")
+        guard case .success(let pack) = result else {
+            Issue.record("expected .success, got \(result)")
+            return
+        }
+        #expect(pack.variants.count == 3)
+        // Exact names per prd.md §6 -- UI_NOTES fix 3 flags this as a
+        // place mockups get wrong; the loaded pack is the one place that
+        // actually matters.
+        #expect(pack.variants.map(\.name) == ["Light Leak", "Polaroid", "Y2K Digicam"])
+
+        // Each variant uses its namesake new op at least once -- a sharper
+        // check than "decoded successfully," which a pack with the right
+        // variant names but the wrong ops would still pass.
+        let opNames = pack.variants.map { $0.ops.map(Self.opTypeName) }
+        #expect(opNames[0].contains("lightLeak"), "expected \"Light Leak\" variant to contain a lightLeak op, got \(opNames[0])")
+        #expect(opNames[1].contains("polaroidFrame"), "expected \"Polaroid\" variant to contain a polaroidFrame op, got \(opNames[1])")
+        #expect(opNames[2].contains("dateStamp"), "expected \"Y2K Digicam\" variant to contain a dateStamp op, got \(opNames[2])")
+    }
+
+    @Test func travelFilmLoadsFromTheAppBundle() throws {
+        let result = VibePackLoader.load(named: "travel_film")
+        guard case .success(let pack) = result else {
+            Issue.record("expected .success, got \(result)")
+            return
+        }
+        #expect(pack.variants.count == 3)
+        #expect(pack.variants.map(\.name) == ["Kodak Style", "Faded Postcard", "Deep Teal"])
+
+        // Travel Film is spec'd to need none of the three Phase 8 ops --
+        // built entirely from the original seven. A pack that accidentally
+        // reached for lightLeak/polaroidFrame/dateStamp would still decode
+        // fine (nothing forbids it structurally), so this checks it
+        // explicitly rather than assuming.
+        for variant in pack.variants {
+            for op in variant.ops {
+                switch op {
+                case .lightLeak, .polaroidFrame, .dateStamp:
+                    Issue.record("\(variant.name) unexpectedly uses a Digicam-only op: \(op)")
+                default:
+                    break
+                }
+            }
+        }
+    }
+
     @Test func missingPackReturnsMissingOrUnreadable() {
         let result = VibePackLoader.load(named: "does_not_exist_pack_xyz")
         guard case .failure(let error) = result else {

@@ -1,0 +1,53 @@
+{
+  "_note": "UNTUNED. Rough, plausible starting parameters only -- nobody has seen these rendered yet. Do not treat as final; see BUILD_ROADMAP's Deferred work register (\"Digicam/Travel Film pack tuning\"). Values will be replaced from rendered output on a real device, same as golden_hour.json -- do NOT adjust Golden Hour while tuning this file.",
+  "_schemaNote": "toneCurve points are [x, y] pairs, e.g. [0.25, 0.24] -- NOT {\"x\":...,\"y\":...} objects. See golden_hour.json's _schemaNote for the device bug this avoids.",
+  "id": "digicam",
+  "displayName": "Digicam",
+  "variants": [
+    {
+      "name": "Light Leak",
+      "ops": [
+        { "type": "temperatureTint", "temperature": 5400, "tint": 4 },
+        { "type": "toneCurve", "points": [
+          [0,    0.04],
+          [0.25, 0.25],
+          [0.5,  0.53],
+          [0.75, 0.79],
+          [1,    0.97]
+        ] },
+        { "type": "colorControls", "saturation": 1.1, "brightness": 0.02, "contrast": 1.05 },
+        { "type": "vignette", "intensity": 0.18, "radius": 1.4 },
+        { "type": "lightLeak", "intensity": 0.55, "corner": "topTrailing" },
+        { "type": "grain", "intensity": 0.08, "size": 1.2 },
+        { "type": "fade", "amount": 0.10 }
+      ]
+    },
+    {
+      "name": "Polaroid",
+      "ops": [
+        { "type": "colorControls", "saturation": 0.95, "brightness": 0.03, "contrast": 0.95 },
+        { "type": "toneCurve", "points": [
+          [0,    0.10],
+          [0.25, 0.28],
+          [0.5,  0.54],
+          [0.75, 0.74],
+          [1,    0.92]
+        ] },
+        { "type": "vignette", "intensity": 0.10, "radius": 1.6 },
+        { "type": "grain", "intensity": 0.05, "size": 1.0 },
+        { "type": "fade", "amount": 0.15 },
+        { "type": "polaroidFrame", "borderWidth": 0.07, "bottomBorderMultiplier": 3.2 }
+      ]
+    },
+    {
+      "name": "Y2K Digicam",
+      "ops": [
+        { "type": "temperatureTint", "temperature": 7200, "tint": -3 },
+        { "type": "colorControls", "saturation": 1.3, "brightness": 0.0, "contrast": 1.15 },
+        { "type": "vignette", "intensity": 0.15, "radius": 1.3 },
+        { "type": "grain", "intensity": 0.03, "size": 0.7 },
+        { "type": "dateStamp", "corner": "bottomTrailing", "scale": 0.035 }
+      ]
+    }
+  ]
+}
