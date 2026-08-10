@@ -203,7 +203,47 @@ final class ExportService {
     /// nothing) and is folded into the same check rather than treated
     /// as a separate case, since both mean the same thing: what's about
     /// to be exported doesn't match what the user chose.
+    /// GUARD, added after 14 assets appeared in the camera roll for a
+    /// 7-photo post -- every one an exact duplicate. Could not find a
+    /// structural double-call in this file (grepped the whole app: one
+    /// exportToPhotos call site -- HandoffView's .task -- one renderAll
+    /// call site, one saveAll call site, one performChanges call site;
+    /// none of them loop or call each other more than once as written).
+    /// Two remaining candidates, neither ruled out with certainty: (a)
+    /// PHPhotoLibrary.performChanges is documented as possibly invoking
+    /// its change block more than once to resolve a write conflict --
+    /// but that's meant for changes that depend on existing state
+    /// (retrying a conflicting edit), and saveAll's block is
+    /// unconditional creation with nothing to conflict with, which
+    /// makes this an imperfect fit, not a confirmed one; (b) something
+    /// causes this function to be entered twice for one export attempt
+    /// -- a duplicate `.task` firing, a retry racing an in-flight call,
+    /// or a mechanism not yet identified. This guard defends against
+    /// (b) unconditionally, regardless of which it turns out to be:
+    /// re-entry is refused while a call is already in flight
+    /// (.requestingPermission/.exporting) or has already finished
+    /// (.done -- nothing legitimate re-triggers export after success).
+    /// Starting fresh from .idle, or explicitly retrying from
+    /// .permissionDenied/.failed, is unaffected. If duplicates STILL
+    /// appear after this ships, that rules out (b) and narrows this
+    /// down to (a) -- worth knowing either way, hence the print below
+    /// staying in place rather than being removed once this guard
+    /// exists.
     func exportToPhotos(_ items: [Item], expectedCount: Int) async {
+        switch phase {
+        case .requestingPermission, .exporting, .done:
+            #if DEBUG
+            print("[export] exportToPhotos called again while phase == \(phase) -- refused, not starting a second export")
+            #endif
+            return
+        case .idle, .permissionDenied, .failed:
+            break
+        }
+
+        #if DEBUG
+        print("[export] exportToPhotos starting -- \(items.count) items")
+        #endif
+
         guard !items.isEmpty, items.count == expectedCount else {
             phase = .failed("some of your photos couldn't be prepared for export.")
             return
@@ -264,7 +304,27 @@ final class ExportService {
     /// exportToPhotos), so there's no memory cost to one transaction over
     /// several, and one transaction is simpler.
     private nonisolated static func saveAll(_ rendered: [Data], referenceDate: Date) async throws {
+        #if DEBUG
+        // Diagnostic, separate from exportToPhotos' phase guard: that
+        // guard defends against this FUNCTION being entered twice; this
+        // counter instead checks whether performChanges invokes its
+        // change block more than once WITHIN a single call here --
+        // Apple documents performChanges as possibly retrying its block
+        // to resolve a write conflict, which would explain 14 assets
+        // for a 7-photo post without exportToPhotos ever being called
+        // twice at all. A plain class (not a struct/local var) so the
+        // closure below -- which performChanges may invoke on a queue
+        // other than this one -- shares the SAME counter instance
+        // across however many times it's actually called.
+        final class InvocationCounter: @unchecked Sendable { var count = 0 }
+        let counter = InvocationCounter()
+        #endif
+
         try await PHPhotoLibrary.shared().performChanges {
+            #if DEBUG
+            counter.count += 1
+            print("[export] saveAll's performChanges block invoked (call #\(counter.count)) -- creating \(rendered.count) assets")
+            #endif
             for (index, data) in rendered.enumerated() {
                 let creationRequest = PHAssetCreationRequest.forAsset()
                 let resourceOptions = PHAssetResourceCreationOptions()
@@ -275,6 +335,12 @@ final class ExportService {
                 creationRequest.creationDate = referenceDate.addingTimeInterval(-Double(index))
             }
         }
+
+        #if DEBUG
+        if counter.count > 1 {
+            print("[export] WARNING: performChanges invoked its change block \(counter.count) times for ONE saveAll call -- this is almost certainly why duplicates appeared in the camera roll")
+        }
+        #endif
     }
 
     private static func describe(_ error: Error) -> String {
