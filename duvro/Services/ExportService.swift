@@ -26,6 +26,7 @@
 //
 
 import Foundation
+import ImageIO
 import Photos
 import UniformTypeIdentifiers
 
@@ -99,6 +100,13 @@ final class ExportService {
         for (index, item) in items.enumerated() {
             #if DEBUG
             let beforeMB = MemoryMonitor.residentMB()
+            // Candidate 1 (per instruction): are later photos physically
+            // larger source files or different pixel dimensions than
+            // earlier ones? File size via FileManager, pixel dimensions
+            // + EXIF orientation via CGImageSourceCopyProperties -- both
+            // metadata-only reads, no decode, so this doesn't itself
+            // perturb the memory numbers being measured.
+            print("[export] photo \(index + 1)/\(items.count) source: \(Self.sourceImageInfo(for: item.photo.originalURL))")
             #endif
 
             // Off the main actor (CIContext work is CPU-bound and
@@ -117,15 +125,35 @@ final class ExportService {
             // see its doc comment in EditEngine.swift for why it's safe
             // to pay that cost here specifically but not in the
             // interactive preview path.
+            //
+            // Candidate 2 (per instruction): does clearRenderCaches()
+            // actually free anything, every time, or does it stop
+            // helping after the first few calls? Measuring immediately
+            // around JUST that call (not the render, not the whole
+            // iteration) isolates its effect specifically -- the
+            // per-photo before/after print below still exists for the
+            // overall picture, but can't tell clearCaches' contribution
+            // apart from renderFullResJPEGData's own allocation.
             let data: Data? = await Task.detached(priority: .userInitiated) {
                 autoreleasepool {
                     let result = EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant)
+                    #if DEBUG
+                    let beforeClearMB = MemoryMonitor.residentMB()
+                    #endif
                     EditEngine.clearRenderCaches()
+                    #if DEBUG
+                    let afterClearMB = MemoryMonitor.residentMB()
+                    print("[export] photo \(index + 1) clearRenderCaches: \(String(format: "%.1f", beforeClearMB))MB -> \(String(format: "%.1f", afterClearMB))MB (Δ\(String(format: "%+.1f", afterClearMB - beforeClearMB))MB)")
+                    #endif
                     return result
                 }
             }.value
 
             guard let data else { throw RenderError.renderFailed(index: index) }
+
+            #if DEBUG
+            print("[export] photo \(index + 1) rendered JPEG: \(data.count / 1024)KB")
+            #endif
 
             try await handle(index, data)
             exportedCount = index + 1
@@ -147,6 +175,37 @@ final class ExportService {
         print("[export] peak resident memory: \(String(format: "%.1f", peakMemoryMB)) MB across \(items.count) photos")
         #endif
     }
+
+    #if DEBUG
+    /// Diagnostic only -- metadata reads (file size via FileManager,
+    /// pixel dimensions + EXIF orientation via
+    /// CGImageSourceCopyPropertiesAtIndex), no decode. Answers candidate
+    /// 1: are the photos where memory jumps physically larger files or
+    /// different pixel dimensions than the ones before them.
+    private nonisolated static func sourceImageInfo(for url: URL) -> String {
+        var parts: [String] = []
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let byteCount = attributes[.size] as? Int {
+            parts.append("\(byteCount / 1024)KB")
+        } else {
+            parts.append("size unknown")
+        }
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            let width = properties[kCGImagePropertyPixelWidth] as? Int
+            let height = properties[kCGImagePropertyPixelHeight] as? Int
+            let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+            if let width, let height {
+                parts.append("\(width)x\(height)px raw, EXIF orientation \(orientation)")
+            } else {
+                parts.append("dimensions unknown")
+            }
+        } else {
+            parts.append("dimensions unknown")
+        }
+        return parts.joined(separator: ", ")
+    }
+    #endif
 
     // MARK: - Phase 7, Task 2: request permission, save in order
 
@@ -274,8 +333,23 @@ final class ExportService {
             // this collection step exists at all.
             var rendered: [Data] = []
             rendered.reserveCapacity(items.count)
-            try await renderAll(items) { _, data in
+            try await renderAll(items) { index, data in
                 rendered.append(data)
+                #if DEBUG
+                // Candidate 3 (per instruction): is the save path itself
+                // what's accumulating -- holding every rendered JPEG in
+                // this array until saveAll runs at the end, rather than
+                // writing and releasing each one as it's produced. This
+                // is the running total of exactly what `rendered` is
+                // holding at this point, independent of whatever
+                // renderAll's own before/after prints show for the
+                // render step itself -- if THIS number climbs in step
+                // with the memory jumps, the array is the culprit; if it
+                // stays small (a few MB total) while memory still jumps,
+                // it isn't.
+                let cumulativeKB = rendered.reduce(0) { $0 + $1.count } / 1024
+                print("[export] rendered[] after photo \(index + 1): \(rendered.count) items held, \(cumulativeKB)KB cumulative")
+                #endif
             }
             try await Self.saveAll(rendered, referenceDate: Date())
             phase = .done
