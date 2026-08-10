@@ -20,6 +20,8 @@
 import Testing
 import Foundation
 import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 import UIKit
 @testable import duvro
 
@@ -82,6 +84,50 @@ struct ExportServiceTests {
         let image = try #require(data.flatMap { UIImage(data: $0) })
         let ratio = image.size.width / image.size.height
         #expect(abs(ratio - 0.8) < 0.02, "expected ~4:5 (0.8), got \(image.size) (ratio \(ratio))")
+    }
+
+    @Test func fullResRenderAppliesEXIFOrientationBeforeCropping() throws {
+        // The bug this catches: CIImage(contentsOf:) with no options
+        // reads the raw, AS-STORED pixel buffer and ignores the image's
+        // EXIF orientation tag entirely. iPhone photos taken in portrait
+        // are commonly stored as a LANDSCAPE pixel buffer plus a tag
+        // saying "rotate 90 CW to display upright" -- SwiftUI (and Image
+        // I/O's own thumbnail generator, PhotoImportService.downsample's
+        // kCGImageSourceCreateThumbnailWithTransform) honor that
+        // automatically; plain CIImage(contentsOf:) does not, which is
+        // why the preview (built from downsampledURL) was correct while
+        // the export (built from originalURL) came out rotated.
+        //
+        // A pure aspect-ratio check (the other tests above) CANNOT catch
+        // this: centerCropRect always forces exactly 4:5 regardless of
+        // which dimension is "wrong," so a broken and a fixed render
+        // both come out 0.8 ratio. This test instead fixes a source
+        // orientation where "corrected" and "as-stored" give
+        // DIFFERENT ABSOLUTE crop sizes, and checks the actual pixels:
+        //
+        // Stored buffer: 200x100 (landscape), tagged EXIF orientation 6
+        // ("rotate 90 CW to display correctly") -- i.e. the TRUE,
+        // corrected image is 100x200 (portrait).
+        //   - Orientation HONORED: source extent 100x200, sourceAspect
+        //     0.5 < 0.8 (target) -> centerCropRect keeps the full 100pt
+        //     width, crops height to 100/0.8 = 125. Output: 100x125.
+        //   - Orientation IGNORED (the bug): source extent stays the raw
+        //     200x100, sourceAspect 2.0 > 0.8 -> keeps the full 100pt
+        //     HEIGHT, crops width to 100*0.8 = 80. Output: 80x100.
+        // 100x125 and 80x100 are unambiguously different sizes.
+        let photo = try Self.makeOrientedTestPhoto(storedWidth: 200, storedHeight: 100, exifOrientation: 6)
+        let variant = EditVariant(name: "identity", ops: [])
+        let data = try #require(EditEngine.renderFullResJPEGData(photo: photo, variant: variant))
+        let image = try #require(UIImage(data: data))
+        let width = Int(image.size.width.rounded())
+        let height = Int(image.size.height.rounded())
+        // Exact width (100), +/-1px tolerance on height (125) -- JPEG
+        // encode/decode rounding, not a correctness question. The
+        // discriminating signal is "close to 100x125," not "exactly" --
+        // 80x100 (orientation ignored) isn't within 20px of either
+        // number, so there's no risk of the tolerance masking the bug.
+        #expect(width == 100, "expected width 100 (orientation honored), got \(width) (200 or 80 would mean orientation was ignored -- the bug)")
+        #expect(abs(height - 125) <= 1, "expected height ~125 (100/0.8, orientation honored), got \(height) (100 would mean orientation was ignored -- the bug)")
     }
 
     @Test func fullResRenderAppliesTheOpChainNotJustTheIdentity() throws {
@@ -185,6 +231,51 @@ struct ExportServiceTests {
         // originalURL and downsampledURL both point at the same fixture --
         // renderFullResJPEGData only ever reads originalURL, but Photo
         // requires both.
+        return Photo(id: UUID(), originalURL: url, downsampledURL: url, thumbnail: image)
+    }
+
+    /// Like makeTestPhoto, but writes the JPEG with an explicit
+    /// kCGImagePropertyOrientation tag via CGImageDestination directly
+    /// (UIImage.jpegData doesn't expose a way to set this) -- the ONLY
+    /// way to construct a fixture that can actually distinguish
+    /// "orientation applied" from "orientation ignored," which
+    /// UIGraphicsImageRenderer-generated images (all orientation 1,
+    /// "normal") cannot.
+    private static func makeOrientedTestPhoto(storedWidth: Int, storedHeight: Int, exifOrientation: UInt32, color: UIColor = .orange) throws -> Photo {
+        let size = CGSize(width: storedWidth, height: storedHeight)
+        // scale = 1 explicitly -- UIGraphicsImageRenderer(size:) alone
+        // defaults to the CURRENT TRAIT ENVIRONMENT's scale (3x on the
+        // Simulator device this ran on), silently turning a requested
+        // 200x100-POINT image into a 600x300-PIXEL one. This test's
+        // whole point is asserting exact pixel dimensions, so an
+        // uncontrolled scale factor makes it meaningless -- first run
+        // produced 300x376 instead of the expected 100x125, which
+        // (300 = 100 * 3, and the math otherwise checked out exactly)
+        // confirmed the FIX was working correctly and the FIXTURE was
+        // the one with the bug, not renderFullResJPEGData.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            color.setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+        }
+        guard let cgImage = image.cgImage else {
+            struct TestImageCreationFailed: Error {}
+            throw TestImageCreationFailed()
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("duvro-export-test-oriented-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+            struct DestinationCreationFailed: Error {}
+            throw DestinationCreationFailed()
+        }
+        let properties: [CFString: Any] = [kCGImagePropertyOrientation: exifOrientation]
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            struct FinalizeFailed: Error {}
+            throw FinalizeFailed()
+        }
         return Photo(id: UUID(), originalURL: url, downsampledURL: url, thumbnail: image)
     }
 }

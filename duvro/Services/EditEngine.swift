@@ -165,7 +165,27 @@ nonisolated enum EditEngine {
     /// clear per-photo failure instead of silently exporting a placeholder
     /// or crashing mid-export.
     static func renderFullResJPEGData(photo: Photo, variant: EditVariant, compressionQuality: CGFloat = 0.9) -> Data? {
-        guard let sourceCIImage = CIImage(contentsOf: photo.originalURL) else { return nil }
+        // .applyOrientationProperty: true -- WITHOUT this, CIImage(contentsOf:)
+        // reads the raw, as-stored pixel buffer and silently ignores the
+        // image's EXIF orientation tag. iPhone photos taken in portrait
+        // are frequently stored with a landscape pixel buffer plus an
+        // orientation flag saying how to display it upright; SwiftUI
+        // (and Image I/O's OWN thumbnail generator, see
+        // PhotoImportService.downsample's kCGImageSourceCreateThumbnailWithTransform,
+        // which is why the <=1280px PREVIEW this same photo produces is
+        // already correct) honor that flag automatically, but plain
+        // CIImage(contentsOf:) does not. Without this option, export
+        // produced a photo rotated 90 degrees relative to its own preview,
+        // AND -- since sourceCIImage.extent below reflects the WRONG,
+        // unrotated dimensions -- centerCropRect crops against the wrong
+        // width/height, the op chain's vignette/grain compute relative to
+        // the wrong extent, and the whole render can end up sized
+        // completely differently than intended. This option makes
+        // sourceCIImage.extent (and everything computed from it) reflect
+        // the image the user actually saw and edited, matching
+        // downsampledURL's already-corrected orientation.
+        let orientationOptions: [CIImageOption: Any] = [.applyOrientationProperty: true]
+        guard let sourceCIImage = CIImage(contentsOf: photo.originalURL, options: orientationOptions) else { return nil }
 
         var image = sourceCIImage
         for op in variant.ops {
