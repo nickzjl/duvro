@@ -438,9 +438,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = A5HQBJWTL4;
 				ENABLE_PREVIEWS = YES;
-				EXCLUDED_SOURCE_FILE_NAMES = (
-					"DebugAssets/*",
-				);
+				EXCLUDED_SOURCE_FILE_NAMES = "DebugAssets/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-Additions.plist";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "duvro saves your finished dump to a duvro album so you can post it.";

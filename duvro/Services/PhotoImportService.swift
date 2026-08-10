@@ -124,7 +124,10 @@ final class PhotoImportService {
 
     /// internal, not private: reused by DebugFixture (Simulator-only debug
     /// tooling, see that file) so it downsamples debug photos identically
-    /// to real imports rather than duplicating this logic.
+    /// to real imports rather than duplicating this logic. Also reused by
+    /// EditEngine.renderFullResJPEGData (Phase 7's resolution cap), which
+    /// is why this warning started firing on every EXPORTED photo, not
+    /// just at import -- same underlying cause, wider surface.
     nonisolated static func downsample(imageAt sourceURL: URL, maxPixelSize: CGFloat, to destinationURL: URL) throws {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, sourceOptions) else {
@@ -139,13 +142,48 @@ final class PhotoImportService {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
             throw ImportError.decodeFailed
         }
+        // CGImageSourceCreateThumbnailAtIndex can hand back a CGImage
+        // carrying an alpha channel (observed from HEIC sources
+        // specifically -- iPhone's default photo format) even though the
+        // content is fully opaque -- JPEG has no alpha support at all, so
+        // encoding that image straight through CGImageDestinationFinalize
+        // below triggers ImageIO's own "trying to save an opaque image
+        // with 'AlphaPremulLast'... will double (!!!) the required memory
+        // when decoding" warning, on every downsample -- which after this
+        // function became export's resolution-cap step too (see the doc
+        // comment above), meant on every exported photo. Re-drawing into
+        // an explicitly opaque bitmap context (.noneSkipLast: no alpha,
+        // 8 bits/component -- matching what the source image actually
+        // is) before encoding is the standard fix: harmless if the source
+        // was already opaque, strips the unnecessary channel if it wasn't.
+        let opaqueImage = makeOpaque(cgImage) ?? cgImage
         guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw ImportError.encodeFailed
         }
-        CGImageDestinationAddImage(destination, cgImage, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+        CGImageDestinationAddImage(destination, opaqueImage, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             throw ImportError.encodeFailed
         }
+    }
+
+    /// Re-draws `cgImage` into a bitmap context with no alpha channel.
+    /// nil (falls back to the original, unmodified image at the call
+    /// site above -- this is a quality-of-encoding fix, not something
+    /// worth failing the whole downsample over) if the color space is
+    /// missing or context creation fails for any reason.
+    nonisolated private static func makeOpaque(_ cgImage: CGImage) -> CGImage? {
+        guard let colorSpace = cgImage.colorSpace else { return nil }
+        guard let context = CGContext(
+            data: nil,
+            width: cgImage.width,
+            height: cgImage.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        return context.makeImage()
     }
 
     /// internal, not private: see the note on `downsample` above.
