@@ -34,12 +34,25 @@ struct duvroApp: App {
 enum DebugLaunchScreen: String {
     case editFlow
     case finalReview
+    /// Phase 8, Task 3: lands directly on PackPreviewSheet -- simctl can't
+    /// tap a pack card to reach it the real way, since a card (and the
+    /// vibe selection screen it lives on, Task 4) is what normally opens
+    /// this sheet.
+    case packPreview
 }
 
 enum DebugLaunch {
     static var screen: DebugLaunchScreen? {
         guard let raw = UserDefaults.standard.string(forKey: "duvroDebugScreen") else { return nil }
         return DebugLaunchScreen(rawValue: raw)
+    }
+
+    /// Only consulted for `.packPreview` -- which of the three packs to
+    /// preview, e.g. `-duvroDebugScreen packPreview -duvroDebugPack
+    /// digicam`. Defaults to golden_hour (matching editFlow/finalReview's
+    /// existing hardcoded choice) when unset or not a real pack id.
+    static var packName: String {
+        UserDefaults.standard.string(forKey: "duvroDebugPack") ?? "golden_hour"
     }
 }
 
@@ -66,8 +79,10 @@ struct DebugLaunchRootView: View {
     var body: some View {
         Group {
             if loaded, let shortlist = sessionStore.shortlist {
-                if case .success(let pack) = VibePackLoader.load(named: "golden_hour") {
+                if case .success(let pack) = VibePackLoader.load(named: packNameToLoad) {
                     switch screen {
+                    case .packPreview:
+                        packPreviewDestination(pack: pack)
                     case .editFlow:
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack)
@@ -124,6 +139,35 @@ struct DebugLaunchRootView: View {
             sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
             loaded = true
         }
+    }
+
+    /// editFlow/finalReview keep their EXACT prior hardcoded value
+    /// ("golden_hour") -- only packPreview's choice is dynamic. Computed
+    /// once here rather than duplicating the literal in two places.
+    private var packNameToLoad: String {
+        switch screen {
+        case .editFlow, .finalReview: return "golden_hour"
+        case .packPreview: return DebugLaunch.packName
+        }
+    }
+
+    /// Presented as a real `.sheet`, not shown unsheeted -- this is the
+    /// only way to reproduce the actual on-device sheet chrome (drag
+    /// handle, corner radius) for a screenshot. `.constant(true)`: this
+    /// launch path exists to verify the sheet's INITIAL appearance, not
+    /// its interactive dismissal (which needs a tap simctl can't send
+    /// anyway) -- see PackPreviewSheet.swift's file header for the fuller
+    /// reasoning.
+    private func packPreviewDestination(pack: VibePack) -> some View {
+        Color(hex: "F7F4EE").ignoresSafeArea()
+            .sheet(isPresented: .constant(true)) {
+                PackPreviewSheet(
+                    pack: pack,
+                    samplePhotos: DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos),
+                    onUseThisVibe: {}
+                )
+                .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
+            }
     }
 
     private func fallback(_ shortlist: ShortlistResult) -> some View {
