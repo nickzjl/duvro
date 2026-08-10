@@ -23,6 +23,7 @@ Work decided on mid-session and pushed back, which does NOT already appear as a 
 5. **Composition-variety doc pass.** prd.md §2, P0.5, and this file's Phase 3.5 still require people/place/food/detail variety, superseded by the decision that Stage 2 composes from what the roll actually contains. Blocks nothing; corrects docs.
 6. **Phase 3 items not yet built:** the photo count text input on the vibe screen, and near-black/near-white exposure rejection. Deferred to keep Phase 3 scoped to clustering and shortlisting. The count input blocks the vibe screen (Phase 8) and is currently hardcoded to 7 in `FallbackSelectionService`.
 7. **Skip pool is too small.** Skip currently promotes from the capped runner-up pool (2–5 photos, `RunnerUpService`), so a picky user who skips more than that runs out of replacements and the post shrinks below the count they asked for. Decision made but not implemented: skip should draw from the full shortlist remainder instead, keeping the loop length equal to the post length for longer. Two rules from the current runner-up-sourced design must survive that change — skipped photos must never be re-offered (this was the original cycling bug, Phase 5), and one-per-cluster still applies so skipping a group shot doesn't immediately offer its near-identical neighbour. Final review's "what we left out" row then becomes the next 5 best from whatever remains, computed AT THAT POINT rather than reserved up front at initial selection (a bigger change than it sounds — `RunnerUpService.compute` is currently called exactly once per session precisely so a skip can't reach candidates the user was never shown; see `SessionStore.skipPhoto`'s doc comment). Open question, not yet decided: what happens when a user exhausts the entire shortlist — does the post shrink (current fallback behavior), or does skip disable with a quiet note that nothing's left to swap in.
+8. **Named album dropped in v1.** `PHAssetCollectionChangeRequest` crashes under `.addOnly` authorization — the grant covers saving assets but not creating a named collection. Confirmed by isolation test: removing album creation entirely exports cleanly. v1 saves to the camera roll and positions the handoff as "select the N most recent photos, tap them in order". Options if this becomes a real complaint in TestFlight: (a) request `.readWrite`, which costs the add-only privacy claim in CLAUDE.md, the welcome screen copy, and the App Store privacy label, and shows users a scarier prompt; (b) offer the album as an opt-in upgrade from the handoff screen, requesting `.readWrite` only if the user taps it — more UI states and a second permission path, and it puts a decision on the one screen the PRD says should funnel forward. Ship (a) or (b) only if users actually ask.
 
 ## 0. Ground rules for Claude Code
 
@@ -46,7 +47,7 @@ duvro/
 │   ├── ScoringService      Vision requests, concurrent (TaskGroup)
 │   ├── CurationService     rejection + emotional boosts + composition selection
 │   ├── EditEngine          JSON pack → CIFilter chain → rendered variants (+ frame/timestamp composites)
-│   ├── ExportService       album creation, ordered save, clipboard, deep link
+│   ├── ExportService       camera-roll save (no album — Deferred work register), ordered, clipboard, deep link
 │   └── CaptionService      (P1) calls Vercel endpoint
 ├── Views/                  one folder per flow step (Welcome, Import, VibeSelect, PackPreview, CurationProgress, Showcase, PickEdits, Confirm, Caption, Handoff)
 ├── Packs/                  golden_hour.json, digicam.json, travel_film.json + preview sample images
@@ -137,9 +138,9 @@ Inserted after Phase 3, before Phase 4 (edit engine). This phase is what turns P
 ### Phase 7 — Export + "ready when you are"
 - [ ] Request add-only photo permission (first time here)
 - [ ] Render FULL-RES from originals with each photo's variant + tweaks (background task, progress)
-- [ ] Create/find album **"duvro — ready to post"**; save in carousel order with staggered `creationDate` (1s apart, newest = photo 1) so IG's picker shows them in order
+- [ ] **No named album** (Deferred work register: NAMED ALBUM DROPPED IN V1 — `PHAssetCollectionChangeRequest` crashes under `.addOnly`, confirmed by isolation test). Save straight to the camera roll in carousel order with staggered `creationDate` (1s apart, newest = photo 1). This ordering is now load-bearing, not just IG-picker-friendly: with no album to find the post in, "the N most recent photos, contiguous, newest-first" is the only thing that makes the exported post identifiable at all
 - [ ] Copy caption (placeholder until Phase 9) to `UIPasteboard`; toast "caption copied — just paste ✨"
-- [ ] **Posting instructions UI:** visual 3-step guide — ① open Instagram → new post ② select the duvro album, tap photos in order (numbered) ③ paste your caption
+- [ ] **Posting instructions UI:** visual 3-step guide — ① open Instagram → new post ② select your N most recent photos (N = the live post count, never hardcoded), tap them in order ③ paste your caption
 - [ ] Open Instagram: `instagram://library` → fallback `instagram://app` → fallback App Store link. Test all paths
 - **Accept (US tester / brother via TestFlight):** photos appear in IG's picker in correct order at full quality; caption pastes; a first-time user completes posting from the instruction screen without help.
 
