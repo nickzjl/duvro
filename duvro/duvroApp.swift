@@ -39,6 +39,11 @@ enum DebugLaunchScreen: String {
     /// vibe selection screen it lives on, Task 4) is what normally opens
     /// this sheet.
     case packPreview
+    /// Phase 8, Task 4: lands on the vibe selection screen itself (photo
+    /// count + pack cards). "use this vibe" inside a pack's preview sheet
+    /// chains forward into editFlow -> finalReview -> handoff, same
+    /// one-way pattern as every other entry point in this file.
+    case vibeSelect
 }
 
 enum DebugLaunch {
@@ -75,14 +80,23 @@ struct DebugLaunchRootView: View {
     /// explicitly skips straight past it (SCOPE, per instruction); this
     /// flag is where that screen will insert itself once it exists.
     @State private var showHandoff = false
+    /// Set once vibeSelect's "use this vibe" hands off -- nil means "still
+    /// showing VibeSelectionView itself," non-nil means "advance into the
+    /// edit flow with this pack," reusing showFinalReview/showHandoff
+    /// above for the rest of the chain.
+    @State private var vibeSelectResult: (pack: VibePack, count: Int)?
 
     var body: some View {
         Group {
             if loaded, let shortlist = sessionStore.shortlist {
-                if case .success(let pack) = VibePackLoader.load(named: packNameToLoad) {
+                if screen == .vibeSelect {
+                    vibeSelectDestination()
+                } else if case .success(let pack) = VibePackLoader.load(named: packNameToLoad) {
                     switch screen {
                     case .packPreview:
                         packPreviewDestination(pack: pack)
+                    case .vibeSelect:
+                        EmptyView() // unreachable -- handled above, before this branch is ever entered
                     case .editFlow:
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack)
@@ -144,10 +158,14 @@ struct DebugLaunchRootView: View {
     /// editFlow/finalReview keep their EXACT prior hardcoded value
     /// ("golden_hour") -- only packPreview's choice is dynamic. Computed
     /// once here rather than duplicating the literal in two places.
+    /// Never actually called for .vibeSelect (that branch short-circuits
+    /// in `body` before reaching this), but the switch still has to be
+    /// exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
         case .editFlow, .finalReview: return "golden_hour"
         case .packPreview: return DebugLaunch.packName
+        case .vibeSelect: return "golden_hour"
         }
     }
 
@@ -168,6 +186,49 @@ struct DebugLaunchRootView: View {
                 )
                 .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
             }
+    }
+
+    /// Phase 8, Task 4. `vibeSelectResult == nil`: still showing
+    /// VibeSelectionView itself. Once set (its "use this vibe" fired),
+    /// chains forward into editFlow -> finalReview -> handoff -- the SAME
+    /// one-way pattern every other entry point in this file uses,
+    /// reusing showFinalReview/showHandoff rather than duplicating them.
+    private func vibeSelectDestination() -> some View {
+        Group {
+            if let vibeSelectResult {
+                if showHandoff {
+                    HandoffView(sessionStore: sessionStore, pack: vibeSelectResult.pack)
+                } else if showFinalReview {
+                    FinalReviewView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
+                        showHandoff = true
+                    }
+                } else {
+                    EditFlowView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
+                        showFinalReview = true
+                    }
+                }
+            } else {
+                VibeSelectionView(
+                    sessionStore: sessionStore,
+                    samplePhotos: { pack in DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos) },
+                    onVibeSelected: { pack, count in
+                        // PHASE 9/10 CURATION INSERTION POINT: prd.md §4
+                        // steps 5-6 ("curation progress" / "curation
+                        // showcase") aren't built this session -- hands off
+                        // directly to the existing on-device fallback path
+                        // instead, same as every other debug entry point in
+                        // this file (loadFixtureIntoSessionStore in
+                        // ImportView, this file's own .task below).
+                        let recomputed = ShortlistService.buildShortlist(from: sessionStore.scores)
+                        sessionStore.setShortlist(recomputed)
+                        let chosen = FallbackSelectionService.select(from: recomputed, count: count)
+                        sessionStore.setChosenSelection(chosen)
+                        sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: recomputed, chosen: chosen.selected))
+                        vibeSelectResult = (pack, count)
+                    }
+                )
+            }
+        }
     }
 
     private func fallback(_ shortlist: ShortlistResult) -> some View {

@@ -16,6 +16,26 @@ struct ImportView: View {
     /// directly, so Phase 5/6 screens have one place to read from.
     @State private var sessionStore = SessionStore()
 
+    // MARK: - Phase 8, Task 4: the real (non-DEBUG) post-import flow
+    /// Shown once sessionStore.photos.count >= minimumPhotos (see `grid`'s
+    /// safeAreaInset below) -- "wire into the real flow after import."
+    @State private var showVibeSelect = false
+    /// Set once VibeSelectionView's "use this vibe" hands off; chains into
+    /// editFlow -> finalReview -> handoff via the three flags below, same
+    /// one-way pattern as duvroApp's -duvroDebugScreen chaining and the
+    /// DEBUG "edit"/"review" buttons further down this file.
+    @State private var realFlowPack: VibePack?
+    @State private var showEditFlowReal = false
+    @State private var showFinalReviewReal = false
+    @State private var showHandoffReal = false
+    /// Set when "use this vibe" is tapped before any photo has been
+    /// scored -- ScoringService itself is #if DEBUG-only today (a larger,
+    /// pre-existing gap; wiring real on-device Vision scoring into the
+    /// Release flow is out of scope for this task), so a Release build
+    /// reaching this screen has nothing to curate from yet. Surfaced
+    /// rather than silently doing nothing or crashing.
+    @State private var vibeSelectBlockedMessage: String?
+
     #if DEBUG
     @State private var scoringService = ScoringService()
     @State private var showScoringGrid = false
@@ -144,6 +164,90 @@ struct ImportView: View {
             }
         }
         #endif
+        // MARK: Phase 8, Task 4: real (non-DEBUG) flow -- compiled in every
+        // configuration, unlike the block above.
+        .fullScreenCover(isPresented: $showVibeSelect) {
+            VibeSelectionView(
+                sessionStore: sessionStore,
+                samplePhotos: { pack in
+                    #if DEBUG
+                    return DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos)
+                    #else
+                    // The ~18 real bundled sample photos this needs don't
+                    // exist yet (BUILD_ROADMAP's Deferred work register) --
+                    // PackPreviewSheet fails safe on an empty array (empty
+                    // placeholder tiles, no crash), which is the honest
+                    // state to show rather than substituting the user's own
+                    // imported photos (prd.md P0.11 requires bundled
+                    // own/licensed images specifically, for copyright
+                    // reasons -- not a stand-in for whatever they picked).
+                    return []
+                    #endif
+                },
+                onVibeSelected: handleVibeSelected
+            )
+        }
+        .fullScreenCover(isPresented: $showEditFlowReal) {
+            if let realFlowPack {
+                EditFlowView(sessionStore: sessionStore, pack: realFlowPack) {
+                    showEditFlowReal = false
+                    showFinalReviewReal = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showFinalReviewReal) {
+            if let realFlowPack {
+                FinalReviewView(sessionStore: sessionStore, pack: realFlowPack) {
+                    // PHASE 9 INSERTION POINT: same as the DEBUG chain above --
+                    // Final Review -> Caption -> Handoff once Caption exists.
+                    showFinalReviewReal = false
+                    showHandoffReal = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showHandoffReal) {
+            if let realFlowPack {
+                HandoffView(sessionStore: sessionStore, pack: realFlowPack)
+            }
+        }
+        .alert("can't curate yet", isPresented: Binding(
+            get: { vibeSelectBlockedMessage != nil },
+            set: { if !$0 { vibeSelectBlockedMessage = nil } }
+        )) {
+            Button("ok") {}
+        } message: {
+            Text(vibeSelectBlockedMessage ?? "")
+        }
+    }
+
+    /// The real (non-DEBUG) "use this vibe" hand-off -- Task 4 spec:
+    /// "vibe selection hands off to the existing shortlist/fallback path
+    /// for now." Mirrors loadFixtureIntoSessionStore's exact pipeline call
+    /// order (ShortlistService -> FallbackSelectionService -> RunnerUpService),
+    /// just against sessionStore.scores (real Vision output, once
+    /// something produces it) instead of DebugFixture's fabricated ones,
+    /// and with the user's own resolved count rather than the default 7.
+    ///
+    /// PHASE 9/10 CURATION INSERTION POINT: prd.md §4 steps 5-6 ("curation
+    /// progress" / "curation showcase") aren't built this session --
+    /// EditFlowView opens directly instead of passing through them first.
+    private func handleVibeSelected(pack: VibePack, count: Int) {
+        guard !sessionStore.scores.isEmpty else {
+            // Expected today outside DEBUG tooling: ScoringService is #if
+            // DEBUG-only (see the state vars above), so a Release build
+            // reaching this screen has no Vision scores to shortlist from
+            // yet. Fail safe -- surface why, don't crash or silently no-op.
+            vibeSelectBlockedMessage = "add some photos and score them first — there's nothing to curate yet."
+            return
+        }
+        let shortlist = ShortlistService.buildShortlist(from: sessionStore.scores)
+        sessionStore.setShortlist(shortlist)
+        let chosen = FallbackSelectionService.select(from: shortlist, count: count)
+        sessionStore.setChosenSelection(chosen)
+        sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+        realFlowPack = pack
+        showVibeSelect = false
+        showEditFlowReal = true
     }
 
     #if DEBUG
@@ -215,6 +319,34 @@ struct ImportView: View {
             .padding(.top, 64)
             .padding(.bottom, 40)
         }
+        // Phase 8, Task 4: "wire into the real flow after import" -- the
+        // only way to reach VibeSelectionView outside DEBUG launch
+        // arguments/buttons. safeAreaInset (not a fixed padding guess)
+        // reserves exactly the button's real height + safe area, same
+        // fix-5 pattern as EditFlowView's primaryButton.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if sessionStore.photos.count >= minimumPhotos, !importService.isImporting {
+                continueButton
+            }
+        }
+    }
+
+    private var continueButton: some View {
+        Button {
+            showVibeSelect = true
+        } label: {
+            Text("choose your vibe")
+                .font(.duvroButton)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(Color(hex: "171614"))
+                .clipShape(Capsule())
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(Color(hex: "F7F4EE"))
     }
 
     private var header: some View {

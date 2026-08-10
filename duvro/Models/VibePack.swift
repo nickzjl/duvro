@@ -15,7 +15,11 @@ import Foundation
 /// = MainActor would otherwise isolate the type (and its synthesized
 /// Decodable conformance) by default -- same fix pattern as
 /// CompositeScoring/ClusteringService/ShortlistService.
-nonisolated struct VibePack: Codable, Sendable {
+/// Identifiable (via the existing `id` field, already unique per pack) --
+/// Phase 8, Task 4 needs `.sheet(item:)` for the pack-preview sheet
+/// (VibeSelectionView), which requires Identifiable; purely additive, no
+/// existing behavior changes.
+nonisolated struct VibePack: Codable, Sendable, Identifiable {
     let id: String
     let displayName: String
     let variants: [EditVariant]

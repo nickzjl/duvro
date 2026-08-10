@@ -32,10 +32,13 @@ struct FallbackSelectionResult {
 }
 
 nonisolated enum FallbackSelectionService {
-    /// Hardcoded until the vibe screen's photo-count text input exists
-    /// (BUILD_ROADMAP Phase 3, deferred this session -- see the roadmap's
-    /// "Photo count text input" bullet). Once that's built, read the
-    /// user-supplied count from the session instead of this constant.
+    /// Phase 8, Task 4 CLOSED this gap: the vibe screen's photo-count text
+    /// input (VibeSelectionView) now exists, and `select(from:count:)`
+    /// below reads the user-supplied, already-validated count instead of
+    /// a constant. `fallbackCount` stays only as the DEFAULT for `count`
+    /// (prd.md's "7 is the sweet spot") and because a couple of debug
+    /// views (EditDebugView, ShortlistDebugView) still display it as a
+    /// label for their own hardcoded-7 debug runs -- see those call sites.
     static let fallbackCount = 7
 
     /// At most one photo per near-duplicate cluster in the final selection.
@@ -48,15 +51,22 @@ nonisolated enum FallbackSelectionService {
     /// `shortlist` is ShortlistService's output -- this never re-derives a
     /// shortlist itself. No category quotas: candidates are ranked purely
     /// by composite score across the whole shortlist, categories be
-    /// damned. If fewer than `fallbackCount` candidates survive the
-    /// per-cluster rule, `selected` is just shorter -- no backfill.
-    static func select(from shortlist: ShortlistResult) -> FallbackSelectionResult {
+    /// damned. If fewer than `count` candidates survive the per-cluster
+    /// rule, `selected` is just shorter -- no backfill.
+    ///
+    /// `count` defaults to `fallbackCount` (7) so every EXISTING call site
+    /// (debug buttons, duvroApp's debug launch path, all written before
+    /// the vibe screen's photo-count input existed) keeps behaving
+    /// identically without being touched. VibeSelectionView is the one
+    /// real caller that passes something else -- the user's own,
+    /// already-validated (4...20, defaulted to 7 if empty/invalid) count.
+    static func select(from shortlist: ShortlistResult, count: Int = fallbackCount) -> FallbackSelectionResult {
         let ranked = shortlist.shortlisted.sorted { $0.compositeScore > $1.compositeScore }
 
         var clusterCount: [Int: Int] = [:]
         var chosen: [PhotoScore] = []
         for candidate in ranked {
-            guard chosen.count < fallbackCount else { break }
+            guard chosen.count < count else { break }
             // Every shortlisted photo has a clusterID (it came from
             // ShortlistService, which only ever emits photos it got a
             // clusterID for); the fallback here only matters if that
@@ -69,7 +79,7 @@ nonisolated enum FallbackSelectionService {
         }
 
         #if DEBUG
-        print("[fallback-select] \(chosen.count)/\(fallbackCount) chosen from \(shortlist.shortlisted.count) shortlisted")
+        print("[fallback-select] \(chosen.count)/\(count) chosen from \(shortlist.shortlisted.count) shortlisted")
         #endif
 
         // `timestamp` is one of the five metrics in the Phase 3.5 payload
