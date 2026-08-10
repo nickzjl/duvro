@@ -57,19 +57,26 @@ struct HandoffView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            Group {
-                switch exportService.phase {
-                case .idle, .requestingPermission, .exporting:
-                    progressState
-                case .permissionDenied:
-                    permissionDeniedState
-                case .failed(let reason):
-                    failedState(reason: reason)
-                case .done:
-                    doneState
-                }
+            // NOT wrapped in a shared .frame(maxWidth: .infinity,
+            // maxHeight: .infinity) across every case -- that was forcing
+            // doneState's ScrollView (which already fills available space
+            // on its own, same as every other ScrollView in this app) into
+            // an extra outer size constraint none of the other screens
+            // built this session have. Each of the simpler states
+            // (progressState/permissionDeniedState/failedState) now
+            // requests centering individually, since THEY genuinely need
+            // it (a bare VStack would otherwise hug the top of the
+            // screen); doneState is left alone.
+            switch exportService.phase {
+            case .idle, .requestingPermission, .exporting:
+                progressState
+            case .permissionDenied:
+                permissionDeniedState
+            case .failed(let reason):
+                failedState(reason: reason)
+            case .done:
+                doneState
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
         .overlay(alignment: .top) { if showToast { toast } }
@@ -154,6 +161,7 @@ struct HandoffView: View {
             }
         }
         .padding(.horizontal, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Permission denied (BUILD_ROADMAP: "handle denial gracefully")
@@ -186,6 +194,7 @@ struct HandoffView: View {
             .padding(.top, 8)
         }
         .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Failed (render or Photos-library error -- distinct from denial)
@@ -217,6 +226,7 @@ struct HandoffView: View {
             .padding(.top, 8)
         }
         .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Done: the mockup's 3-step layout (design/14_hand off.png)
@@ -308,20 +318,37 @@ struct HandoffView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(sessionStore.post) { score in
-                    Group {
-                        if let image = renderCache[score.id] {
-                            Image(uiImage: image).resizable()
-                        } else if let photo = sessionStore.photo(for: score.id) {
-                            Image(uiImage: photo.thumbnail).resizable()
-                        }
-                    }
-                    .aspectRatio(4 / 5, contentMode: .fill)
-                    .frame(width: 96, height: 120)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    photoStripCard(score)
                 }
             }
             .padding(.horizontal, 20)
+        }
+    }
+
+    /// Each branch gets .resizable().aspectRatio(4/5, contentMode: .fill)
+    /// applied DIRECTLY, not chained onto a Group wrapping the if/else --
+    /// this replaces a version where those modifiers sat on the Group
+    /// instead of either Image, which rendered thumbnails square rather
+    /// than 4:5. Matches FinalReviewView.thumbnailCell's structure (same
+    /// per-branch pattern, proven working, screenshotted earlier this
+    /// session) rather than inventing a second way to size a thumbnail
+    /// card.
+    @ViewBuilder
+    private func photoStripCard(_ score: PhotoScore) -> some View {
+        if let image = renderCache[score.id] {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(4 / 5, contentMode: .fill)
+                .frame(width: 96, height: 120)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else if let photo = sessionStore.photo(for: score.id) {
+            Image(uiImage: photo.thumbnail)
+                .resizable()
+                .aspectRatio(4 / 5, contentMode: .fill)
+                .frame(width: 96, height: 120)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 
