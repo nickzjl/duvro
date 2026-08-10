@@ -130,6 +130,47 @@ struct ExportServiceTests {
         #expect(abs(height - 125) <= 1, "expected height ~125 (100/0.8, orientation honored), got \(height) (100 would mean orientation was ignored -- the bug)")
     }
 
+    @Test func maxExportPixelSizeIs2048() {
+        // Pins the product decision (roughly 1.9x Instagram's own
+        // carousel serving resolution, ~1080x1350) as a real test, not
+        // just a comment -- a future accidental change to this constant
+        // fails loudly instead of silently.
+        #expect(EditEngine.maxExportPixelSize == 2048)
+    }
+
+    @Test func fullResRenderCapsResolutionBeforeCropping() throws {
+        // The bug this catches: rendering a 24MP+ source at native
+        // resolution measured 531MB peak against a 400MB ceiling on
+        // device (97-123MB retained per 24MP photo, never released).
+        // The fix downsamples via PhotoImportService.downsample BEFORE
+        // the crop/op chain ever sees the pixels -- this test checks
+        // that the crop actually runs against the CAPPED size, not the
+        // original, by picking a maxPixelSize where the two cases
+        // produce unambiguously different absolute output dimensions
+        // (both already-passing 4:5-ratio tests can't tell them apart,
+        // same reasoning as the orientation test above -- centerCropRect
+        // always forces exactly 4:5 regardless of which size it's
+        // handed).
+        //
+        // Source: 400x300 (4:3 landscape). maxPixelSize: 200.
+        //   - Cap applied: downsamples to 200x150 (aspect preserved) --
+        //     sourceAspect 1.333 > 0.8 -> centerCropRect keeps the full
+        //     150pt height, crops width to 150*0.8 = 120. Output: 120x150.
+        //   - Cap ignored (the bug): crop runs against the original
+        //     400x300 (SAME aspect, since downsampling preserves it) --
+        //     keeps the full 300pt height, crops width to 300*0.8 = 240.
+        //     Output: 240x300 -- exactly double the capped case in both
+        //     dimensions.
+        let photo = try Self.makeOrientedTestPhoto(storedWidth: 400, storedHeight: 300, exifOrientation: 1)
+        let variant = EditVariant(name: "identity", ops: [])
+        let data = try #require(EditEngine.renderFullResJPEGData(photo: photo, variant: variant, maxPixelSize: 200))
+        let image = try #require(UIImage(data: data))
+        let width = Int(image.size.width.rounded())
+        let height = Int(image.size.height.rounded())
+        #expect(abs(width - 120) <= 2, "expected width ~120 (capped to 200x150, then 4:5 cropped), got \(width) (240 would mean the cap was ignored -- the bug)")
+        #expect(abs(height - 150) <= 2, "expected height ~150 (full capped height kept), got \(height) (300 would mean the cap was ignored -- the bug)")
+    }
+
     @Test func fullResRenderAppliesTheOpChainNotJustTheIdentity() throws {
         // A visible op (heavy fade) should change pixel data relative to
         // an empty chain -- sanity check that this function isn't

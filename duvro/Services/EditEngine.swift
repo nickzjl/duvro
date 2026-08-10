@@ -106,6 +106,23 @@ nonisolated enum EditEngine {
         sharedContext.clearCaches()
     }
 
+    /// Export renders at up to this many pixels on the long edge, not the
+    /// source's native sensor resolution. This is a DEVIATION from what
+    /// BUILD_ROADMAP/prd.md originally said ("full-resolution rendering,"
+    /// "at full quality") -- see BUILD_ROADMAP's Deferred work register
+    /// and Known gotchas for the full record of why, and the doc updates
+    /// that went with this change. Short version: on-device measurement
+    /// showed 531MB peak against the 400MB ceiling with 24MP sources
+    /// rendered at native resolution -- current iPhones shoot up to 48MP,
+    /// so uncapped rendering doesn't just barely violate the ceiling, it
+    /// scales with whatever resolution phones ship next. 2048px is
+    /// roughly 1.9x Instagram's own carousel serving resolution
+    /// (~1080x1350) -- everything past that is invisible to anyone
+    /// viewing the post on the platform this app exists to serve, and
+    /// 2048px is still a genuinely sharp image for anything else the
+    /// saved camera-roll copy gets used for.
+    static let maxExportPixelSize: CGFloat = 2048
+
     // MARK: - Full-res export (Phase 7)
 
     /// duvro's ONE, canonical 4:5 crop -- a centered fill-crop of `extent`
@@ -139,15 +156,20 @@ nonisolated enum EditEngine {
         return CGRect(x: x, y: y, width: cropWidth, height: cropHeight)
     }
 
-    /// Full-res JPEG render for export -- ExportService's per-photo unit of
-    /// work. Loads from `photo.originalURL` (the full-resolution PHPicker
-    /// copy), NOT `downsampledURL` (the <=1280px preview source `render`
-    /// above uses). Encodes straight from CIImage to JPEG Data via the
-    /// shared CIContext, skipping an intermediate CGImage/UIImage
-    /// materialization -- one less full-res buffer alive at a time, which
-    /// matters here specifically (a 12MP original is ~48MB decoded; this
-    /// function's caller is expected to run this inside an
-    /// autoreleasepool, one photo at a time -- see ExportService).
+    /// Full-res (capped, see maxExportPixelSize) JPEG render for export --
+    /// ExportService's per-photo unit of work. Loads from
+    /// `photo.originalURL` (the full-resolution PHPicker copy), NOT
+    /// `downsampledURL` (the <=1280px preview source `render` above uses)
+    /// -- but not the RAW original either: first downsamples to
+    /// `maxPixelSize` via PhotoImportService.downsample (the exact same
+    /// Image I/O thumbnail path import already uses for the ≤1280px
+    /// preview -- proven, EXIF-aware, no new image-processing logic) into
+    /// a temp file, then reads THAT. Encodes straight from CIImage to
+    /// JPEG Data via the shared CIContext, skipping an intermediate
+    /// CGImage/UIImage materialization -- one less full-res buffer alive
+    /// at a time, which matters here specifically; this function's caller
+    /// is expected to run this inside an autoreleasepool, one photo at a
+    /// time -- see ExportService.
     ///
     /// Crops AFTER the op chain runs, not before: vignette/bloom/grain
     /// ops compute relative to whatever extent they're handed, and the
@@ -160,32 +182,51 @@ nonisolated enum EditEngine {
     /// preview's actual pixels, per centerCropRect's doc comment.
     ///
     /// Never throws -- returns nil on any failure (unreadable original,
-    /// full chain fails to render even after EditEngine's own per-op
-    /// fail-safe, or JPEG encoding fails) so ExportService can surface a
-    /// clear per-photo failure instead of silently exporting a placeholder
-    /// or crashing mid-export.
-    static func renderFullResJPEGData(photo: Photo, variant: EditVariant, compressionQuality: CGFloat = 0.9) -> Data? {
+    /// the downsample step failing, full chain fails to render even after
+    /// EditEngine's own per-op fail-safe, or JPEG encoding fails) so
+    /// ExportService can surface a clear per-photo failure instead of
+    /// silently exporting a placeholder or crashing mid-export.
+    static func renderFullResJPEGData(photo: Photo, variant: EditVariant, compressionQuality: CGFloat = 0.9, maxPixelSize: CGFloat = maxExportPixelSize) -> Data? {
+        // Downsample BEFORE ever touching CoreImage -- a 24MP+ original
+        // decoded and run through a multi-step CIFilter chain at native
+        // resolution measured 531MB peak against a 400MB ceiling on
+        // device (97-123MB retained per 24MP photo, never released --
+        // see maxExportPixelSize's doc comment and BUILD_ROADMAP's Known
+        // gotchas). Capping here, via Image I/O's thumbnail generator
+        // (which can use JPEG's own DCT scaling to avoid ever fully
+        // decoding the original at native resolution), means CoreImage
+        // never sees more pixels than maxPixelSize allows in the first
+        // place -- cheaper than decoding full-res and scaling down after.
+        // Written to a temp file (Image I/O's thumbnail API is
+        // file/CGImage-based, not a CIImage producer) and removed once
+        // this function returns.
+        let cappedURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("duvro-export-capped-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        defer { try? FileManager.default.removeItem(at: cappedURL) }
+        do {
+            try PhotoImportService.downsample(imageAt: photo.originalURL, maxPixelSize: maxPixelSize, to: cappedURL)
+        } catch {
+            return nil
+        }
+
         // .applyOrientationProperty: true -- WITHOUT this, CIImage(contentsOf:)
         // reads the raw, as-stored pixel buffer and silently ignores the
         // image's EXIF orientation tag. iPhone photos taken in portrait
         // are frequently stored with a landscape pixel buffer plus an
         // orientation flag saying how to display it upright; SwiftUI
-        // (and Image I/O's OWN thumbnail generator, see
-        // PhotoImportService.downsample's kCGImageSourceCreateThumbnailWithTransform,
-        // which is why the <=1280px PREVIEW this same photo produces is
-        // already correct) honor that flag automatically, but plain
-        // CIImage(contentsOf:) does not. Without this option, export
-        // produced a photo rotated 90 degrees relative to its own preview,
-        // AND -- since sourceCIImage.extent below reflects the WRONG,
-        // unrotated dimensions -- centerCropRect crops against the wrong
-        // width/height, the op chain's vignette/grain compute relative to
-        // the wrong extent, and the whole render can end up sized
-        // completely differently than intended. This option makes
-        // sourceCIImage.extent (and everything computed from it) reflect
-        // the image the user actually saw and edited, matching
-        // downsampledURL's already-corrected orientation.
+        // (and Image I/O's OWN thumbnail generator -- including the
+        // downsample call directly above, via
+        // kCGImageSourceCreateThumbnailWithTransform, which is why
+        // cappedURL is already correctly oriented on disk) honor that
+        // flag automatically, but plain CIImage(contentsOf:) does not.
+        // Kept here even though cappedURL's orientation is already baked
+        // in (downsample's transform option normalizes the tag to
+        // "normal" once applied) -- harmless if redundant, and this
+        // function's own test (fullResRenderAppliesEXIFOrientationBeforeCropping)
+        // verifies the actual behavior either way rather than assuming it.
         let orientationOptions: [CIImageOption: Any] = [.applyOrientationProperty: true]
-        guard let sourceCIImage = CIImage(contentsOf: photo.originalURL, options: orientationOptions) else { return nil }
+        guard let sourceCIImage = CIImage(contentsOf: cappedURL, options: orientationOptions) else { return nil }
 
         var image = sourceCIImage
         for op in variant.ops {
