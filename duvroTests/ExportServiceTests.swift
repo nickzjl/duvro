@@ -130,6 +130,27 @@ struct ExportServiceTests {
         #expect(abs(height - 125) <= 1, "expected height ~125 (100/0.8, orientation honored), got \(height) (100 would mean orientation was ignored -- the bug)")
     }
 
+    @Test func fullResRenderProducesPortraitFromAnAlreadyLandscapeSource() throws {
+        // Reproduces the exact reported scenario: a source that's
+        // GENUINELY landscape (not portrait-stored-sideways) -- EXIF
+        // orientation 1, no rotation flag, unlike the
+        // orientation-6 test above. 400x300 mirrors 4032x3024's ~4:3
+        // shape (scaled down for test speed). If the crop were being
+        // skipped or mis-applied specifically for already-landscape,
+        // no-rotation-needed sources, this is the case that would show
+        // it -- checked via width < height directly (not just ratio),
+        // since that's the literal, unambiguous signal for "exported
+        // landscape instead of portrait."
+        let photo = try Self.makeOrientedTestPhoto(storedWidth: 400, storedHeight: 300, exifOrientation: 1)
+        let variant = EditVariant(name: "identity", ops: [])
+        let data = try #require(EditEngine.renderFullResJPEGData(photo: photo, variant: variant))
+        let image = try #require(UIImage(data: data))
+        let width = Int(image.size.width.rounded())
+        let height = Int(image.size.height.rounded())
+        #expect(width < height, "expected portrait output (width < height) per UI_NOTES §1's 4:5 everywhere, got \(width)x\(height)")
+        #expect(width == 240 && abs(height - 300) <= 1, "expected ~240x300 (300 * 0.8 = 240, full height kept), got \(width)x\(height)")
+    }
+
     @Test func maxExportPixelSizeIs2048() {
         // Pins the product decision (roughly 1.9x Instagram's own
         // carousel serving resolution, ~1080x1350) as a real test, not
