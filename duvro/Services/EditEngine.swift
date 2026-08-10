@@ -78,6 +78,34 @@ nonisolated enum EditEngine {
         return photo.thumbnail
     }
 
+    /// Releases CIContext's OWN internal caches -- compiled kernel
+    /// programs and, more importantly here, intermediate/cached render
+    /// results. NOT touched by autoreleasepool: autoreleasepool only
+    /// scopes Objective-C AUTORELEASED objects allocated in the current
+    /// pool; it has no effect on state a persistent object (this shared,
+    /// app-wide CIContext) deliberately holds onto internally across
+    /// calls. That persistence is normally a FEATURE -- it's why a shared
+    /// context exists at all (the file header's "creating a CIContext per
+    /// render is the standard CoreImage performance mistake") -- for the
+    /// interactive preview path (`render`, used by EditFlowView's 3-variant
+    /// comparison, measured 8-17ms/render) it's exactly what makes repeat
+    /// renders fast. For full-res export it's the opposite problem: the
+    /// SAME shared context that's already accumulated cache from every
+    /// preview render this whole session (import grid, edit screen,
+    /// final review, the handoff photo strip) goes on to render 7 more
+    /// 12MP images through itself with nothing ever releasing what it's
+    /// holding -- on device this measured 733MB peak against a 400MB
+    /// ceiling, 1.8x over. Export isn't latency-sensitive the way
+    /// interactive preview is (a progress bar is already showing;
+    /// clearing caches costs render time on the NEXT photo but not
+    /// correctness), so the trade toward memory safety is a clear one
+    /// here specifically. Call after each full-res render
+    /// (ExportService.renderAll) -- never from the preview path, where
+    /// it would undo the whole reason a shared context exists.
+    static func clearRenderCaches() {
+        sharedContext.clearCaches()
+    }
+
     // MARK: - Full-res export (Phase 7)
 
     /// duvro's ONE, canonical 4:5 crop -- a centered fill-crop of `extent`

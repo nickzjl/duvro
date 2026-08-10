@@ -97,16 +97,31 @@ final class ExportService {
         defer { peakTracker.cancel() }
 
         for (index, item) in items.enumerated() {
+            #if DEBUG
+            let beforeMB = MemoryMonitor.residentMB()
+            #endif
+
             // Off the main actor (CIContext work is CPU-bound and
             // shouldn't block the progress UI), autoreleasepool-wrapped
-            // (this is the actual memory guarantee -- Image I/O and
-            // CoreImage both autorelease intermediate buffers internally,
-            // and without this those buffers can live until the
-            // surrounding Task exits rather than being freed between
-            // photos).
+            // (the memory guarantee for OBJECTIVE-C AUTORELEASED
+            // intermediates -- Image I/O and CoreImage both autorelease
+            // internally, and without this those buffers can live until
+            // the surrounding Task exits rather than being freed between
+            // photos). autoreleasepool alone was NOT sufficient on
+            // device (733MB peak measured against a 400MB ceiling) --
+            // it doesn't touch sharedContext's OWN internal caches,
+            // which persist across calls by design (that's the whole
+            // point of a shared, reused CIContext) and were accumulating
+            // across all 7 renders with nothing ever releasing them.
+            // clearRenderCaches() is the other half of this guarantee --
+            // see its doc comment in EditEngine.swift for why it's safe
+            // to pay that cost here specifically but not in the
+            // interactive preview path.
             let data: Data? = await Task.detached(priority: .userInitiated) {
                 autoreleasepool {
-                    EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant)
+                    let result = EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant)
+                    EditEngine.clearRenderCaches()
+                    return result
                 }
             }.value
 
@@ -114,6 +129,17 @@ final class ExportService {
 
             try await handle(index, data)
             exportedCount = index + 1
+
+            #if DEBUG
+            // Per-photo delta, not just the running peak -- requested
+            // specifically to see whether memory climbs linearly across
+            // the 7 (would indicate something still accumulating) or
+            // stays roughly flat photo to photo (would confirm
+            // clearRenderCaches actually bounds it, rather than just
+            // moving the peak later).
+            let afterMB = MemoryMonitor.residentMB()
+            print("[export] photo \(index + 1)/\(items.count): \(String(format: "%.1f", beforeMB))MB -> \(String(format: "%.1f", afterMB))MB (Δ\(String(format: "%+.1f", afterMB - beforeMB))MB)")
+            #endif
         }
 
         peakMemoryMB = max(peakMemoryMB, MemoryMonitor.residentMB())
