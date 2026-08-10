@@ -5,12 +5,13 @@
 //  Phase 7, Task 1: renders the final post at full resolution, one photo
 //  at a time, bounded memory, in carousel order, with visible progress.
 //  Deliberately knows NOTHING about Photos/PHPhotoLibrary -- `handle` is
-//  supplied by the caller (Task 2: saving to the "duvro — ready to post"
-//  album) and is called once per rendered photo. This split makes the
-//  memory/order/crop guarantees below independently true and
-//  independently verifiable (see duvroTests/ExportServiceTests.swift, run
-//  entirely on-device-free via the Simulator/synthetic photos) without
-//  needing Photos permission or a physical device at all.
+//  supplied by the caller (Task 2: saving to the camera roll, see the
+//  MARK below for why there's no album) and is called once per rendered
+//  photo. This split makes the memory/order/crop guarantees below
+//  independently true and independently verifiable (see
+//  duvroTests/ExportServiceTests.swift, run entirely on-device-free via
+//  the Simulator/synthetic photos) without needing Photos permission or a
+//  physical device at all.
 //
 //  MEMORY (the real risk this phase, per BUILD_ROADMAP): a 12MP photo is
 //  roughly 48MB decoded; the project's ceiling is 400MB (currently peaking
@@ -123,52 +124,45 @@ final class ExportService {
 
     // MARK: - Phase 7, Task 2: request permission, save in order
 
-    /// ============================================================
-    /// DIAGNOSTIC BUILD -- NOT the final architecture. Read before
-    /// touching this section again.
-    /// ============================================================
-    /// The crash ("attempted to access privacy-sensitive data...
-    /// NSPhotoLibraryUsageDescription") persisted on a fresh install
-    /// after the fetch-removal fix, with every other Photos read call
-    /// (PHFetchResult/PHFetchOptions/PHAsset/PHImageManager/
-    /// PHCachingImageManager) and every legacy no-access-level
-    /// authorization form grepped and confirmed absent from the whole
-    /// app (not just this file). The only remaining Photos-write
-    /// surface was album creation -- PHAssetCollectionChangeRequest.
-    /// creationRequestForAssetCollection(withTitle:) + addAssets --
-    /// which Apple's .addOnly documentation and sample code frame
-    /// exclusively around saving ASSETS (typically to the camera
-    /// roll), never around creating a named ALBUM (a DIFFERENT
-    /// PHObject type). This build strips album creation entirely to
-    /// isolate whether THAT specifically is what .addOnly doesn't
-    /// cover: bare PHAssetCreationRequest + addResource + creationDate,
-    /// saved straight to the camera roll, no "duvro — ready to post"
-    /// album at all.
+    /// NO ALBUM. v1 saves to the camera roll, not a named "duvro — ready
+    /// to post" album -- confirmed by isolation test that
+    /// PHAssetCollectionChangeRequest.creationRequestForAssetCollection
+    /// crashes under PHAccessLevel.addOnly authorization ("attempted to
+    /// access privacy-sensitive data... NSPhotoLibraryUsageDescription").
+    /// .addOnly covers saving ASSETS but not creating a named COLLECTION
+    /// -- a different PHObject type. Every other candidate was ruled out
+    /// first: no PHFetchResult/PHFetchOptions/PHAsset/PHImageManager/
+    /// PHCachingImageManager call anywhere in the app, no legacy
+    /// no-access-level authorization form anywhere, device-build
+    /// Info.plist confirmed correct. Removing album creation entirely
+    /// (this file's saveAll) exported cleanly on device -- that's the
+    /// confirmation, not a guess. Recorded in BUILD_ROADMAP's Deferred
+    /// work register (NAMED ALBUM DROPPED IN V1) along with the two
+    /// options if this becomes a real complaint in TestFlight
+    /// (.readWrite, or an opt-in upgrade flow) -- neither is built
+    /// without a product decision first.
     ///
-    /// If this build does NOT crash on device: album creation was the
-    /// trigger, confirming .addOnly covers asset saves but not
-    /// collection creation -- the named-album requirement (prd.md §4
-    /// step 10 / BUILD_ROADMAP Phase 7) needs a product decision (drop
-    /// the album, or request broader permission) before this comes
-    /// back.
-    /// If this build ALSO crashes: album creation was never the
-    /// (whole) story, and something about bare asset creation itself
-    /// -- addResource, creationDate, or performChanges more generally
-    /// under .addOnly -- needs to be isolated next.
-    /// ============================================================
+    /// Consequence this design leans on: since there's no album to find
+    /// the post in, the staggered creationDate below isn't just nice
+    /// ordering -- it's THE mechanism that makes the post findable at
+    /// all. Every photo lands in the user's camera roll among whatever
+    /// else is there, so making them the N most recent, contiguous,
+    /// newest-first assets is load-bearing, not decorative. HandoffView's
+    /// copy reflects this ("select the N most recent photos, tap them in
+    /// order").
 
     /// The ONE entry point HandoffView calls. Requests add-only Photos
     /// permission (prd.md §4 step 10 / BUILD_ROADMAP Phase 7: "the first
     /// and only time the app asks" -- this app never asks for read access,
     /// PHPicker never required it), renders `items` via renderAll above,
-    /// then saves everything via saveAll (see its doc comment -- this is
-    /// currently a diagnostic build with no album). Staggers each asset's
-    /// creationDate 1 SECOND APART with the FIRST item newest --
+    /// then saves everything to the camera roll via saveAll. Staggers each
+    /// asset's creationDate 1 SECOND APART with the FIRST item newest --
     /// Instagram's own picker sorts most-recent-first, so that's what
-    /// actually controls the order photos appear there (prd.md §7). Dates
-    /// are anchored to `Date()` at call time, not backdated, so the
-    /// photos don't bury themselves somewhere back in the user's camera
-    /// roll.
+    /// actually controls the order photos appear there (prd.md §7), and
+    /// with no album to search, it's also what makes the post identifiable
+    /// as a contiguous block at all (see the MARK above). Dates are
+    /// anchored to `Date()` at call time, not backdated, so the photos
+    /// don't bury themselves somewhere back in the user's camera roll.
     ///
     /// `expectedCount` is HandoffView's sessionStore.post.count -- the
     /// number of photos the user actually chose. `items` is built via a
@@ -231,13 +225,18 @@ final class ExportService {
         await exportToPhotos(items, expectedCount: expectedCount)
     }
 
-    /// DIAGNOSTIC BUILD -- see the block comment above exportToPhotos.
-    /// Bare asset creation only, no PHAssetCollectionChangeRequest, no
-    /// album -- saves straight to the camera roll to isolate whether
-    /// album creation specifically is what triggers the crash. This is
-    /// NOT the target architecture; the "duvro — ready to post" album is
-    /// a real product requirement (prd.md §4 step 10) that this build
-    /// temporarily drops on purpose, only to get a clean signal.
+    /// Bare asset creation, straight to the camera roll -- no
+    /// PHAssetCollectionChangeRequest, no album, by design (see the MARK
+    /// above this section). One PHPhotoLibrary.performChanges transaction
+    /// for the whole post: PHAssetCreationRequest.forAsset() doesn't
+    /// return anything that needs linking to a collection this time, so
+    /// (unlike the album-based version this replaced) there's no
+    /// structural reason every asset has to be created in the same
+    /// transaction -- it's still batched this way for the same reason as
+    /// before: `rendered` is already fully collected in memory by the
+    /// time this runs (small JPEG Data, not decoded buffers -- see
+    /// exportToPhotos), so there's no memory cost to one transaction over
+    /// several, and one transaction is simpler.
     private nonisolated static func saveAll(_ rendered: [Data], referenceDate: Date) async throws {
         try await PHPhotoLibrary.shared().performChanges {
             for (index, data) in rendered.enumerated() {
