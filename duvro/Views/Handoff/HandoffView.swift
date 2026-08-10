@@ -43,6 +43,17 @@ struct HandoffView: View {
         }
     }
 
+    /// "your 7 most recent photos" (or "your 1 most recent photo" -- a
+    /// dump can shrink well below prd.md's usual 4-20 via skips, so this
+    /// is a real case, not paranoia). Always the LIVE post count, never
+    /// hardcoded -- with no album to point at, this number is the only
+    /// thing telling the user which photos in their camera roll are
+    /// theirs to select.
+    private var recentPhotosPhrase: String {
+        let count = sessionStore.post.count
+        return "your \(count) most recent \(count == 1 ? "photo" : "photos")"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -230,8 +241,8 @@ struct HandoffView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     stepRow(
                         icon: "square.and.arrow.down",
-                        title: "saved to duvro album",
-                        body: "images have been rendered in high-resolution to your local storage."
+                        title: "saved to your camera roll",
+                        body: "your photos are saved in full quality, ready to post."
                     )
                     stepRow(
                         icon: "doc.on.clipboard",
@@ -241,7 +252,16 @@ struct HandoffView: View {
                     stepRow(
                         icon: "arrow.up.forward.app",
                         title: "finish in instagram",
-                        body: "select your photos from the duvro album, tap them in order, then paste your caption."
+                        // NO album to point at (Deferred work register:
+                        // NAMED ALBUM DROPPED IN V1) -- staggered
+                        // creationDate at export (ExportService.saveAll)
+                        // is what actually makes "the N most recent
+                        // photos" true, so this copy is describing a real
+                        // mechanism, not a suggestion. Order is the one
+                        // thing that silently breaks the post if the user
+                        // gets it wrong (UI_NOTES handoff fix) -- "tap
+                        // them in order" is required, not decoration.
+                        body: "select your \(recentPhotosPhrase) and tap \(sessionStore.post.count == 1 ? "it" : "them") in order, then paste your caption."
                     )
                 }
                 .padding(.horizontal, 20)

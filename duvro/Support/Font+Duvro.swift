@@ -65,10 +65,10 @@ extension Font {
         .custom("Inter-Medium", size: 15, relativeTo: .subheadline)
     }
 
-    /// Handoff screen step titles ("saved to duvro album" etc.) only.
-    /// UI_NOTES §6: the mockup sets these in a ~13pt serif, which sits
-    /// below the 20pt Newsreader floor (§1) -- same weight (Medium), same
-    /// approximate size, corrected to Inter.
+    /// Handoff screen step titles ("saved to your camera roll" etc.)
+    /// only. UI_NOTES §6: the mockup sets these in a ~13pt serif, which
+    /// sits below the 20pt Newsreader floor (§1) -- same weight (Medium),
+    /// same approximate size, corrected to Inter.
     static var duvroStepTitle: Font {
         .custom("Inter-Medium", size: 13, relativeTo: .subheadline)
     }
