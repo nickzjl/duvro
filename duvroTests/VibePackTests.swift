@@ -118,8 +118,14 @@ struct VibePackTests {
     }
 
     @Test func unknownOpTypeFailsToDecode() {
+        // "lightLeak" used to be the example here, back when it wasn't a
+        // real case yet -- now that Phase 8 added it (see DigicamOpsTests),
+        // reusing it would make this test pass for the wrong reason (a
+        // missing `corner` field, not an unrecognized type). "halation" is
+        // still genuinely unimplemented (EditOp.swift's header comment) --
+        // swap this fixture again if that ever changes.
         let json = Data("""
-        { "type": "lightLeak", "intensity": 0.5 }
+        { "type": "halation", "intensity": 0.5 }
         """.utf8)
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(EditOp.self, from: json)
@@ -301,6 +307,9 @@ struct VibePackTests {
         case .bloom: return "bloom"
         case .grain: return "grain"
         case .fade: return "fade"
+        case .lightLeak: return "lightLeak"
+        case .polaroidFrame: return "polaroidFrame"
+        case .dateStamp: return "dateStamp"
         }
     }
 

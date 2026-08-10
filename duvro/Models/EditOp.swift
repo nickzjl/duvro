@@ -8,12 +8,12 @@
 //  applied in the array order EditVariant.ops lists them. EditEngine is
 //  where an op turns into an actual CIFilter.
 //
-//  Deliberately NOT included yet: lightLeak, polaroidFrame, dateStamp,
-//  halation -- those are Digicam/Travel Film ops (Phase 8), out of scope
-//  this session. Adding them later is a new `case` here plus a new branch
-//  in EditEngine.apply(_:to:) -- no restructuring of this file or the JSON
-//  schema required, which is the point of the discriminated-union shape
-//  below.
+//  Phase 8 added three more: lightLeak, polaroidFrame, dateStamp -- Digicam
+//  pack ops (Travel Film needs none of these three; it's built entirely
+//  from the original seven). Exactly the "new case here plus a new branch
+//  in EditEngine.apply(_:to:)" this file predicted -- no restructuring of
+//  the JSON schema. `halation` is still NOT included; nothing in Digicam or
+//  Travel Film needs it.
 //
 
 import CoreGraphics
@@ -46,6 +46,42 @@ nonisolated enum EditOp: Sendable, Equatable {
     /// Lifted-black "faded film" look. Not a single built-in CIFilter --
     /// EditEngine builds a tone curve from `amount` (0...1).
     case fade(amount: Double)
+    /// Warm red-orange glare wash, radiating from one corner -- a
+    /// vintage film-burn/light-leak look, composited via a screen blend so
+    /// it can only ever brighten, never darken. `intensity` is the leak's
+    /// peak opacity at its origin (0...1-ish); `corner` is where it
+    /// radiates from -- one of "topLeading", "topTrailing",
+    /// "bottomLeading", "bottomTrailing" (SwiftUI-style, RTL-safe naming).
+    /// An unrecognized corner string is a no-op (EditEngine.apply), not a
+    /// crash -- see that fail-safe contract in EditEngine's header.
+    case lightLeak(intensity: Double, corner: String)
+    /// Composites the photo, shrunk down, onto a white Polaroid-style
+    /// frame -- NOT a crop or aspect-ratio change to the op chain's own
+    /// extent (EditEngine.applyPolaroidFrame preserves `image.extent`
+    /// exactly, same invariant every other op in this file maintains, so
+    /// the existing render()/renderFullResJPEGData() crop logic keeps
+    /// working unmodified); the frame's border geometry is computed
+    /// relative to the eventual 4:5 export/preview crop window
+    /// (EditEngine.centerCropRect), so it reads correctly post-crop
+    /// regardless of the source photo's native aspect ratio.
+    /// `borderWidth` is the top/left/right border as a fraction of the
+    /// 4:5 window's width (e.g. 0.06 = 6%); `bottomBorderMultiplier` is
+    /// how many times thicker the bottom border is than the other three --
+    /// a real Polaroid's signature asymmetry. Values outside
+    /// EditEngine.applyPolaroidFrame's sanity bounds are a no-op.
+    case polaroidFrame(borderWidth: Double, bottomBorderMultiplier: Double)
+    /// Yellow Y2K-digicam-style date/time stamp in a bottom corner.
+    /// `corner` is "bottomLeading" or "bottomTrailing" (unrecognized ->
+    /// no-op); `scale` is the stamp's text height as a fraction of the
+    /// image's height. The date text itself is NOT a pack parameter --
+    /// there's no EXIF capture-timestamp source in the pipeline yet
+    /// (PhotoImportService never reads DateTimeOriginal, Photo has no
+    /// timestamp field), so EditEngine.currentDateStampText() stands in
+    /// with today's date at render time. That gap is isolated behind that
+    /// one function specifically so wiring in a real capture date later is
+    /// a one-line swap there, not a change to this case's shape or to
+    /// applyDateStamp's call site. Flagged in the Phase 8 session report.
+    case dateStamp(corner: String, scale: Double)
 }
 
 /// nonisolated on the extension too -- the Codable conformance is declared
@@ -54,14 +90,18 @@ nonisolated enum EditOp: Sendable, Equatable {
 nonisolated extension EditOp: Codable {
     private enum OpType: String, Codable {
         case toneCurve, colorControls, temperatureTint, vignette, bloom, grain, fade
+        case lightLeak, polaroidFrame, dateStamp
     }
 
     /// Field names are reused across cases on purpose (e.g. `intensity`
-    /// appears in vignette, bloom, and grain) -- each is decoded only
-    /// within its own case's branch below, so there's no collision; JSON
-    /// stays readable without prefixed key names like `vignetteIntensity`.
+    /// appears in vignette, bloom, grain, AND lightLeak) -- each is decoded
+    /// only within its own case's branch below, so there's no collision;
+    /// JSON stays readable without prefixed key names like
+    /// `vignetteIntensity`. `corner` is shared between lightLeak and
+    /// dateStamp for the same reason.
     private enum CodingKeys: String, CodingKey {
         case type, points, saturation, brightness, contrast, temperature, tint, intensity, radius, size, amount
+        case corner, borderWidth, bottomBorderMultiplier, scale
     }
 
     init(from decoder: Decoder) throws {
@@ -98,6 +138,21 @@ nonisolated extension EditOp: Codable {
             )
         case .fade:
             self = .fade(amount: try container.decode(Double.self, forKey: .amount))
+        case .lightLeak:
+            self = .lightLeak(
+                intensity: try container.decode(Double.self, forKey: .intensity),
+                corner: try container.decode(String.self, forKey: .corner)
+            )
+        case .polaroidFrame:
+            self = .polaroidFrame(
+                borderWidth: try container.decode(Double.self, forKey: .borderWidth),
+                bottomBorderMultiplier: try container.decode(Double.self, forKey: .bottomBorderMultiplier)
+            )
+        case .dateStamp:
+            self = .dateStamp(
+                corner: try container.decode(String.self, forKey: .corner),
+                scale: try container.decode(Double.self, forKey: .scale)
+            )
         }
     }
 
@@ -131,6 +186,18 @@ nonisolated extension EditOp: Codable {
         case .fade(let amount):
             try container.encode(OpType.fade, forKey: .type)
             try container.encode(amount, forKey: .amount)
+        case .lightLeak(let intensity, let corner):
+            try container.encode(OpType.lightLeak, forKey: .type)
+            try container.encode(intensity, forKey: .intensity)
+            try container.encode(corner, forKey: .corner)
+        case .polaroidFrame(let borderWidth, let bottomBorderMultiplier):
+            try container.encode(OpType.polaroidFrame, forKey: .type)
+            try container.encode(borderWidth, forKey: .borderWidth)
+            try container.encode(bottomBorderMultiplier, forKey: .bottomBorderMultiplier)
+        case .dateStamp(let corner, let scale):
+            try container.encode(OpType.dateStamp, forKey: .type)
+            try container.encode(corner, forKey: .corner)
+            try container.encode(scale, forKey: .scale)
         }
     }
 }

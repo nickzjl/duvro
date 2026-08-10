@@ -305,6 +305,12 @@ nonisolated enum EditEngine {
             return applyGrain(intensity: intensity, size: size, to: image)
         case .fade(let amount):
             return applyFade(amount: amount, to: image)
+        case .lightLeak(let intensity, let corner):
+            return applyLightLeak(intensity: intensity, corner: corner, to: image)
+        case .polaroidFrame(let borderWidth, let bottomBorderMultiplier):
+            return applyPolaroidFrame(borderWidth: borderWidth, bottomBorderMultiplier: bottomBorderMultiplier, to: image)
+        case .dateStamp(let corner, let scale):
+            return applyDateStamp(corner: corner, scale: scale, to: image)
         }
     }
 
@@ -368,5 +374,173 @@ nonisolated enum EditEngine {
         filter.point3 = CGPoint(x: 0.75, y: 0.75 - lift * 0.3)
         filter.point4 = CGPoint(x: 1, y: 1 - lift * 0.4)
         return filter.outputImage
+    }
+
+    // MARK: - Phase 8: Digicam ops
+
+    /// Maps a "topLeading"/"topTrailing"/"bottomLeading"/"bottomTrailing"
+    /// corner string to a CI-space point (origin bottom-left, Y up) within
+    /// `extent` -- shared by lightLeak and dateStamp so both ops describe
+    /// corners the same way in JSON. An unrecognized string returns nil,
+    /// which each caller treats as "op is a no-op" (fail-safe: a malformed
+    /// pack renders the unedited image, never crashes).
+    private static func cornerPoint(_ corner: String, in extent: CGRect) -> CGPoint? {
+        switch corner {
+        case "topLeading": return CGPoint(x: extent.minX, y: extent.maxY)
+        case "topTrailing": return CGPoint(x: extent.maxX, y: extent.maxY)
+        case "bottomLeading": return CGPoint(x: extent.minX, y: extent.minY)
+        case "bottomTrailing": return CGPoint(x: extent.maxX, y: extent.minY)
+        default: return nil
+        }
+    }
+
+    /// Warm red-orange glare radiating from one corner -- a radial
+    /// gradient, screen-blended so it can only brighten (never darken,
+    /// unlike vignette). `intensity` is the gradient's peak alpha at its
+    /// origin; radius is a fixed proportion of the image's longest edge
+    /// (Digicam's own JSON is the only tuning knob this session -- see
+    /// BUILD_ROADMAP's Deferred work register, "Digicam/Travel Film pack
+    /// tuning," matching Golden Hour's own untuned status).
+    private static func applyLightLeak(intensity: Double, corner: String, to image: CIImage) -> CIImage? {
+        guard intensity > 0 else { return image }
+        let extent = image.extent
+        guard !extent.isEmpty, !extent.isInfinite, extent.width > 0, extent.height > 0 else { return image }
+        guard let origin = cornerPoint(corner, in: extent) else { return image } // unknown corner -- no-op, not a crash
+
+        let gradient = CIFilter.radialGradient()
+        gradient.center = origin
+        gradient.radius0 = 0
+        gradient.radius1 = Float(max(extent.width, extent.height)) * 0.85
+        let peakAlpha = CGFloat(min(max(intensity, 0), 1))
+        gradient.color0 = CIColor(red: 1.0, green: 0.45, blue: 0.15, alpha: peakAlpha)
+        gradient.color1 = CIColor(red: 1.0, green: 0.45, blue: 0.15, alpha: 0)
+        guard let gradientImage = gradient.outputImage?.cropped(to: extent) else { return nil }
+
+        let blend = CIFilter.screenBlendMode()
+        blend.inputImage = gradientImage
+        blend.backgroundImage = image
+        return blend.outputImage?.cropped(to: extent)
+    }
+
+    /// Composites the photo, shrunk to fit, onto a white Polaroid-style
+    /// frame with an asymmetric (thicker) bottom border. Returns an image
+    /// with the SAME extent as `image` -- it does not resize or reshape
+    /// the op chain's canvas, so render()'s and renderFullResJPEGData()'s
+    /// existing crop logic (both keyed off the SOURCE's own extent) keeps
+    /// working completely unmodified; this op fits into that contract
+    /// exactly like every other one in this file. Border/interior geometry
+    /// is computed against `centerCropRect(for: extent, aspectRatio: 4/5)`
+    /// -- the SAME window renderFullResJPEGData crops to after the op
+    /// chain runs -- rather than the full native extent, so the frame
+    /// reads correctly (centered, right proportions) once that crop
+    /// actually happens, regardless of the source photo's native aspect
+    /// ratio. Content outside that window is painted white too; it simply
+    /// gets cropped away downstream and never needs to look correct on its
+    /// own.
+    private static func applyPolaroidFrame(borderWidth: Double, bottomBorderMultiplier: Double, to image: CIImage) -> CIImage? {
+        let extent = image.extent
+        guard !extent.isEmpty, !extent.isInfinite, extent.width > 0, extent.height > 0 else { return image }
+        // Sanity bounds -- a border wide enough to eat the whole frame, or
+        // a non-positive/absurd bottom multiplier, would produce a
+        // degenerate or ill-defined interior. Treat as malformed: no-op,
+        // not a crash or a blank frame.
+        guard borderWidth > 0, borderWidth < 0.3, bottomBorderMultiplier >= 1, bottomBorderMultiplier < 6 else { return image }
+
+        let window = centerCropRect(for: extent, aspectRatio: 4.0 / 5.0)
+        let side = window.width * CGFloat(borderWidth)
+        let top = side
+        let bottom = side * CGFloat(bottomBorderMultiplier)
+        let interior = CGRect(
+            x: window.minX + side,
+            y: window.minY + bottom, // CI space: Y up, so the thicker border sits near the window's minY (bottom of frame)
+            width: window.width - side * 2,
+            height: window.height - top - bottom
+        )
+        guard interior.width > 0, interior.height > 0 else { return image }
+
+        let scale = min(interior.width / extent.width, interior.height / extent.height)
+        let scaledWidth = extent.width * scale
+        let scaledHeight = extent.height * scale
+        let dx = interior.minX + (interior.width - scaledWidth) / 2 - extent.minX * scale
+        let dy = interior.minY + (interior.height - scaledHeight) / 2 - extent.minY * scale
+        let scaledPhoto = image
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .transformed(by: CGAffineTransform(translationX: dx, y: dy))
+
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: extent)
+        return scaledPhoto.composited(over: white).cropped(to: extent)
+    }
+
+    /// System monospace stands in for a bundled Y2K-digicam-style font --
+    /// none is bundled yet (Task 1 gap, flagged in the Phase 8 session
+    /// report; do NOT bundle a new font to close this without asking).
+    /// Isolated so swapping in a real font later is a one-line change
+    /// here, not a change to applyDateStamp's call site.
+    private static func dateStampFont(pointSize: CGFloat) -> UIFont {
+        UIFont.monospacedSystemFont(ofSize: pointSize, weight: .semibold)
+    }
+
+    /// No EXIF capture timestamp exists in the pipeline yet -- Task 1 gap,
+    /// flagged in the Phase 8 session report. PhotoImportService never
+    /// reads kCGImagePropertyExifDateTimeOriginal (or a PHAsset
+    /// creationDate) and Photo has no timestamp field, so there is no real
+    /// capture date to stamp. Today's date stands in as a placeholder,
+    /// isolated behind this one function specifically so wiring in a real
+    /// capture timestamp later is a one-line swap here, not a change to
+    /// applyDateStamp or to EditOp's shape.
+    private static func currentDateStampText(referenceDate: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM'/'dd'/'yy"
+        return formatter.string(from: referenceDate)
+    }
+
+    /// Yellow Y2K-digicam-style date stamp in a bottom corner. No single
+    /// CIFilter draws text -- rasterizes via UIGraphicsImageRenderer (a
+    /// small transparent-background bitmap, converted to CIImage), then
+    /// composites it over the base image at the requested corner.
+    private static func applyDateStamp(corner: String, scale: Double, to image: CIImage) -> CIImage? {
+        let extent = image.extent
+        guard !extent.isEmpty, !extent.isInfinite, extent.width > 0, extent.height > 0 else { return image }
+        guard scale > 0, scale < 0.2 else { return image } // sanity bound -- not a crash-avoidance need, just an absurd-value guard
+
+        let text = currentDateStampText()
+        let fontSize = extent.height * CGFloat(scale)
+        guard fontSize > 0 else { return image }
+        let font = dateStampFont(pointSize: fontSize)
+        // Y2K digicam yellow -- warm and slightly desaturated, closer to a
+        // real LCD/stamp overlay than a flat #FFFF00.
+        let stampColor = UIColor(red: 1.0, green: 0.86, blue: 0.15, alpha: 1.0)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: stampColor]
+        let textSize = (text as NSString).size(withAttributes: attributes)
+        guard textSize.width > 0, textSize.height > 0 else { return image }
+
+        let padding = fontSize * 0.3
+        let canvasSize = CGSize(width: textSize.width + padding * 2, height: textSize.height + padding * 2)
+        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        let stampUIImage = renderer.image { _ in
+            // Faint black backing offset by 1pt so the yellow glyph still
+            // reads against bright backgrounds (a bare yellow stamp
+            // disappears on a light sky) -- matches real digicam overlays.
+            let shadowAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.black.withAlphaComponent(0.35)]
+            (text as NSString).draw(at: CGPoint(x: padding + 1, y: padding + 1), withAttributes: shadowAttributes)
+            (text as NSString).draw(at: CGPoint(x: padding, y: padding), withAttributes: attributes)
+        }
+        guard let stampCGImage = stampUIImage.cgImage else { return image }
+        let stampCIImage = CIImage(cgImage: stampCGImage)
+
+        let margin = fontSize * 0.8
+        let x: CGFloat
+        switch corner {
+        case "bottomLeading":
+            x = extent.minX + margin
+        case "bottomTrailing":
+            x = extent.maxX - margin - canvasSize.width
+        default:
+            return image // unknown corner -- no-op, not a crash
+        }
+        let y = extent.minY + margin
+
+        let positioned = stampCIImage.transformed(by: CGAffineTransform(translationX: x, y: y))
+        return positioned.composited(over: image).cropped(to: extent)
     }
 }
