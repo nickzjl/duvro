@@ -3,14 +3,15 @@
 //  duvro
 //
 //  Phase 4: parses an EditVariant's op list into a CIFilter chain and
-//  renders it. One shared, Metal-backed CIContext for the whole app --
-//  creating a CIContext per render is the standard CoreImage performance
-//  mistake (each one compiles/caches its own shaders); see sharedContext
-//  below.
+//  renders it. One shared, Metal-backed CIContext for the PREVIEW path
+//  (`render`, below) -- creating a CIContext per render is the standard
+//  CoreImage performance mistake (each one compiles/caches its own
+//  shaders); see sharedContext below. The EXPORT path (`renderFullResJPEGData`)
+//  deliberately does NOT use it -- see that function's doc comment for why
+//  a fresh, disposed-per-render context is the correct trade there instead.
 //
 //  Renders from the existing <=1280px downsamples (Photo.downsampledURL),
-//  not full-res -- full-res rendering only happens at export (Phase 7, not
-//  built this session).
+//  not full-res -- full-res rendering only happens at export (Phase 7).
 //
 //  FAIL-SAFE (BUILD_ROADMAP Phase 4): any failure anywhere in the pipeline
 //  (source image unreadable, an op fails to produce output, the context
@@ -38,17 +39,25 @@ import UIKit
 /// background so timing/measurement isn't confounded by UI work) need this
 /// to actually be callable from there.
 nonisolated enum EditEngine {
-    /// One Metal-backed CIContext, created once, reused for every render.
-    /// CIContext is documented thread-safe for concurrent rendering
-    /// (Apple's CoreImage docs), matching the enum's nonisolated-ness.
-    private static let sharedContext: CIContext = {
+    /// One Metal-backed CIContext, created once, reused for every PREVIEW
+    /// render. CIContext is documented thread-safe for concurrent
+    /// rendering (Apple's CoreImage docs), matching the enum's
+    /// nonisolated-ness.
+    private static let sharedContext: CIContext = makeContext()
+
+    /// Try Metal, fall back to software -- shared by sharedContext's
+    /// lazy init above (one, for the app's lifetime) and
+    /// renderFullResJPEGData below (one per full-res render, disposed
+    /// after). Factored out so both paths get the identical fallback
+    /// behavior from one place rather than two copies that could drift.
+    private static func makeContext() -> CIContext {
         if let device = MTLCreateSystemDefaultDevice() {
             return CIContext(mtlDevice: device)
         }
         // No Metal device (e.g. an unusual host) -- fall back to a
         // software context rather than crashing at first use.
         return CIContext(options: nil)
-    }()
+    }
 
     /// Renders `photo`'s downsampled preview through `variant`'s op chain.
     /// Never throws. On any failure, falls back toward the original,
@@ -76,34 +85,6 @@ nonisolated enum EditEngine {
             return UIImage(cgImage: originalCGImage)
         }
         return photo.thumbnail
-    }
-
-    /// Releases CIContext's OWN internal caches -- compiled kernel
-    /// programs and, more importantly here, intermediate/cached render
-    /// results. NOT touched by autoreleasepool: autoreleasepool only
-    /// scopes Objective-C AUTORELEASED objects allocated in the current
-    /// pool; it has no effect on state a persistent object (this shared,
-    /// app-wide CIContext) deliberately holds onto internally across
-    /// calls. That persistence is normally a FEATURE -- it's why a shared
-    /// context exists at all (the file header's "creating a CIContext per
-    /// render is the standard CoreImage performance mistake") -- for the
-    /// interactive preview path (`render`, used by EditFlowView's 3-variant
-    /// comparison, measured 8-17ms/render) it's exactly what makes repeat
-    /// renders fast. For full-res export it's the opposite problem: the
-    /// SAME shared context that's already accumulated cache from every
-    /// preview render this whole session (import grid, edit screen,
-    /// final review, the handoff photo strip) goes on to render 7 more
-    /// 12MP images through itself with nothing ever releasing what it's
-    /// holding -- on device this measured 733MB peak against a 400MB
-    /// ceiling, 1.8x over. Export isn't latency-sensitive the way
-    /// interactive preview is (a progress bar is already showing;
-    /// clearing caches costs render time on the NEXT photo but not
-    /// correctness), so the trade toward memory safety is a clear one
-    /// here specifically. Call after each full-res render
-    /// (ExportService.renderAll) -- never from the preview path, where
-    /// it would undo the whole reason a shared context exists.
-    static func clearRenderCaches() {
-        sharedContext.clearCaches()
     }
 
     /// Export renders at up to this many pixels on the long edge, not the
@@ -165,11 +146,38 @@ nonisolated enum EditEngine {
     /// Image I/O thumbnail path import already uses for the ≤1280px
     /// preview -- proven, EXIF-aware, no new image-processing logic) into
     /// a temp file, then reads THAT. Encodes straight from CIImage to
-    /// JPEG Data via the shared CIContext, skipping an intermediate
-    /// CGImage/UIImage materialization -- one less full-res buffer alive
-    /// at a time, which matters here specifically; this function's caller
-    /// is expected to run this inside an autoreleasepool, one photo at a
-    /// time -- see ExportService.
+    /// JPEG Data via a FRESH CIContext (EditEngine.makeContext()) --
+    /// deliberately NOT sharedContext, and disposed (falls out of scope,
+    /// ARC releases it) when this function returns.
+    ///
+    /// Why: after the resolution cap above, memory measured on device
+    /// was still climbing across the 7-photo loop and never coming back
+    /// down -- +97 to +123MB per 24MP photo, permanently. Traced to
+    /// sharedContext itself: CIContext.clearCaches(), called after every
+    /// render, measured EXACTLY +0.0MB every single time on the
+    /// expensive photos -- proof the retained memory isn't in what that
+    /// method targets (its documented "caches," e.g. compiled shader
+    /// programs). Most likely explanation: Metal-backed intermediate
+    /// textures tied to the context's own lifetime, not its cache --
+    /// Golden Hour's grain op specifically (applyGrain, a
+    /// softLightBlendMode composite of two full-size inputs) is harder
+    /// for CoreImage to fuse into fewer passes than the rest of the
+    /// chain, which is consistent with retention scaling with op-chain
+    /// complexity rather than just image size. A context that goes out
+    /// of scope releases everything tied to it unconditionally --
+    /// doesn't depend on identifying exactly what CoreImage was holding
+    /// or why, the way clearCaches() apparently needed to and couldn't.
+    /// Slower than the shared context (each one recompiles its shaders
+    /// from scratch -- the "standard CoreImage performance mistake" this
+    /// file's header warns about) -- an acceptable trade specifically
+    /// because export isn't latency-sensitive the way interactive
+    /// preview is (a progress bar is already showing), and because the
+    /// cost is now FLAT per photo, not accumulating across the loop the
+    /// way the retained memory was. sharedContext stays exactly as-is
+    /// for `render` above -- EditFlowView's 3-variant comparison,
+    /// verified 8-17ms/render, where reuse is what makes that speed
+    /// possible and there's no 7-photo loop for anything to accumulate
+    /// across.
     ///
     /// Crops AFTER the op chain runs, not before: vignette/bloom/grain
     /// ops compute relative to whatever extent they're handed, and the
@@ -187,6 +195,10 @@ nonisolated enum EditEngine {
     /// ExportService can surface a clear per-photo failure instead of
     /// silently exporting a placeholder or crashing mid-export.
     static func renderFullResJPEGData(photo: Photo, variant: EditVariant, compressionQuality: CGFloat = 0.9, maxPixelSize: CGFloat = maxExportPixelSize) -> Data? {
+        // Fresh, disposed-per-render context -- see the doc comment
+        // above for why this replaced sharedContext here specifically.
+        let context = makeContext()
+
         // Downsample BEFORE ever touching CoreImage -- a 24MP+ original
         // decoded and run through a multi-step CIFilter chain at native
         // resolution measured 531MB peak against a 400MB ceiling on
@@ -237,7 +249,7 @@ nonisolated enum EditEngine {
         let cropped = image.cropped(to: cropRect)
 
         let colorSpace = cropped.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        if let data = try? sharedContext.jpegRepresentation(
+        if let data = try? context.jpegRepresentation(
             of: cropped,
             colorSpace: colorSpace,
             options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: compressionQuality]
@@ -249,7 +261,7 @@ nonisolated enum EditEngine {
         // unedited, cropped source before giving up, matching `render`'s
         // own fallback-toward-original spirit.
         let croppedSource = sourceCIImage.cropped(to: cropRect)
-        return try? sharedContext.jpegRepresentation(
+        return try? context.jpegRepresentation(
             of: croppedSource,
             colorSpace: colorSpace,
             options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: compressionQuality]

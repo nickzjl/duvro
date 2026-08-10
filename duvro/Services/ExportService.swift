@@ -116,36 +116,16 @@ final class ExportService {
             // internally, and without this those buffers can live until
             // the surrounding Task exits rather than being freed between
             // photos). autoreleasepool alone was NOT sufficient on
-            // device (733MB peak measured against a 400MB ceiling) --
-            // it doesn't touch sharedContext's OWN internal caches,
-            // which persist across calls by design (that's the whole
-            // point of a shared, reused CIContext) and were accumulating
-            // across all 7 renders with nothing ever releasing them.
-            // clearRenderCaches() is the other half of this guarantee --
-            // see its doc comment in EditEngine.swift for why it's safe
-            // to pay that cost here specifically but not in the
-            // interactive preview path.
-            //
-            // Candidate 2 (per instruction): does clearRenderCaches()
-            // actually free anything, every time, or does it stop
-            // helping after the first few calls? Measuring immediately
-            // around JUST that call (not the render, not the whole
-            // iteration) isolates its effect specifically -- the
-            // per-photo before/after print below still exists for the
-            // overall picture, but can't tell clearCaches' contribution
-            // apart from renderFullResJPEGData's own allocation.
+            // device even after the resolution cap and a fresh
+            // per-render CIContext -- for the FULL story on why a fresh
+            // context replaced the shared one specifically for this
+            // call (clearCaches() measured exactly +0.0MB, every time,
+            // on the expensive photos -- proof the retained memory
+            // wasn't in what that method targets), see
+            // renderFullResJPEGData's doc comment in EditEngine.swift.
             let data: Data? = await Task.detached(priority: .userInitiated) {
                 autoreleasepool {
-                    let result = EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant)
-                    #if DEBUG
-                    let beforeClearMB = MemoryMonitor.residentMB()
-                    #endif
-                    EditEngine.clearRenderCaches()
-                    #if DEBUG
-                    let afterClearMB = MemoryMonitor.residentMB()
-                    print("[export] photo \(index + 1) clearRenderCaches: \(String(format: "%.1f", beforeClearMB))MB -> \(String(format: "%.1f", afterClearMB))MB (Δ\(String(format: "%+.1f", afterClearMB - beforeClearMB))MB)")
-                    #endif
-                    return result
+                    EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant)
                 }
             }.value
 
@@ -159,12 +139,11 @@ final class ExportService {
             exportedCount = index + 1
 
             #if DEBUG
-            // Per-photo delta, not just the running peak -- requested
-            // specifically to see whether memory climbs linearly across
-            // the 7 (would indicate something still accumulating) or
-            // stays roughly flat photo to photo (would confirm
-            // clearRenderCaches actually bounds it, rather than just
-            // moving the peak later).
+            // Per-photo delta, not just the running peak -- shows
+            // whether memory now stays roughly flat photo to photo
+            // (the resolution cap and fresh per-render context both
+            // landed) or still climbs (either fix incomplete, or a
+            // third factor neither accounts for).
             let afterMB = MemoryMonitor.residentMB()
             print("[export] photo \(index + 1)/\(items.count): \(String(format: "%.1f", beforeMB))MB -> \(String(format: "%.1f", afterMB))MB (Δ\(String(format: "%+.1f", afterMB - beforeMB))MB)")
             #endif

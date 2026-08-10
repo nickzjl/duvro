@@ -11,12 +11,12 @@
 //  EditEngine/CompositeScoring/ClusteringService/ShortlistService). Every
 //  existing caller (PhotoImportService's peak tracker, ScoringService,
 //  ExportService.renderAll's own peak tracker) happened to already run on
-//  MainActor, so this went unnoticed until ExportService.renderAll started
-//  calling it from inside a Task.detached closure (measuring memory
-//  immediately around EditEngine.clearRenderCaches(), which has to run
-//  alongside the render itself, off the main actor) -- that call site
-//  surfaced the missing annotation as a warning rather than silently
-//  working by accident.
+//  MainActor, so this went unnoticed until a since-removed diagnostic
+//  briefly called it from inside a Task.detached closure and the compiler
+//  caught the missing annotation as a warning rather than it silently
+//  working by accident. Kept nonisolated regardless of whether a current
+//  caller needs it from off the main actor -- it's correct for what this
+//  function actually is, not just for today's call sites.
 //
 
 import Foundation
