@@ -262,6 +262,44 @@ struct ExportServiceTests {
         #expect(seen == [0]) // stopped at the failure -- item 2 (the good one after the bad one) never ran
     }
 
+    // MARK: - ExportService.creationDate: which end of the batch is newest
+
+    @Test func firstPhotoGetsTheOldestDateLastPhotoGetsTheNewest() {
+        // This exact formula was wrong once already -- shipped with
+        // index 0 getting the newest date, based on an assumption about
+        // Instagram's picker order that on-device testing proved
+        // backwards (the picker showed the LAST-saved photo first, not
+        // the first-saved one). Verified directly here so a future
+        // change to this formula can't silently re-invert it without a
+        // test noticing.
+        let now = Date()
+        let count = 7
+
+        // The reference date itself (0 seconds back) belongs to the
+        // LAST index (6), not index 0.
+        let first = ExportService.creationDate(forIndex: 0, count: count, referenceDate: now)
+        let last = ExportService.creationDate(forIndex: count - 1, count: count, referenceDate: now)
+        #expect(last == now, "the LAST photo should be the newest -- exactly referenceDate")
+        #expect(first == now.addingTimeInterval(-6), "the FIRST photo should be the oldest -- (count-1) seconds before referenceDate")
+        #expect(first < last, "chronologically, photo 1 must predate photo 7 -- that's what makes it appear first in a picker sorted oldest-first")
+
+        // Strictly ascending, 1 second apart, for every index in between
+        // too -- not just the two ends.
+        let dates = (0..<count).map { ExportService.creationDate(forIndex: $0, count: count, referenceDate: now) }
+        for index in 1..<count {
+            let delta = dates[index].timeIntervalSince(dates[index - 1])
+            #expect(abs(delta - 1) < 0.001, "expected exactly 1 second between consecutive photos, got \(delta)")
+        }
+    }
+
+    @Test func creationDateHandlesASinglePhotoPost() {
+        // count - 1 - index must never go negative -- a 1-photo post
+        // (skip can shrink a dump this far) should just get
+        // referenceDate itself, not crash or produce a nonsensical date.
+        let now = Date()
+        #expect(ExportService.creationDate(forIndex: 0, count: 1, referenceDate: now) == now)
+    }
+
     // MARK: - Fixtures
 
     private actor Recorder {

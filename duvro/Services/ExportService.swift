@@ -210,23 +210,36 @@ final class ExportService {
     /// the post in, the staggered creationDate below isn't just nice
     /// ordering -- it's THE mechanism that makes the post findable at
     /// all. Every photo lands in the user's camera roll among whatever
-    /// else is there, so making them the N most recent, contiguous,
-    /// newest-first assets is load-bearing, not decorative. HandoffView's
-    /// copy reflects this ("select the N most recent photos, tap them in
-    /// order").
+    /// else is there, so making them the N most recent, contiguous
+    /// assets is load-bearing, not decorative. HandoffView's copy
+    /// reflects this ("select the N most recent photos, tap them in
+    /// order") -- deliberately silent on which end is newest, since that
+    /// part turned out to be exactly what was wrong here (see
+    /// exportToPhotos' doc comment) and the copy never needed to commit
+    /// to it either way.
 
     /// The ONE entry point HandoffView calls. Requests add-only Photos
     /// permission (prd.md §4 step 10 / BUILD_ROADMAP Phase 7: "the first
     /// and only time the app asks" -- this app never asks for read access,
     /// PHPicker never required it), renders `items` via renderAll above,
     /// then saves everything to the camera roll via saveAll. Staggers each
-    /// asset's creationDate 1 SECOND APART with the FIRST item newest --
-    /// Instagram's own picker sorts most-recent-first, so that's what
-    /// actually controls the order photos appear there (prd.md §7), and
-    /// with no album to search, it's also what makes the post identifiable
-    /// as a contiguous block at all (see the MARK above). Dates are
-    /// anchored to `Date()` at call time, not backdated, so the photos
-    /// don't bury themselves somewhere back in the user's camera roll.
+    /// asset's creationDate 1 SECOND APART with the LAST item newest --
+    /// see saveAll's `secondsBeforeNewest` for the actual formula. This
+    /// was inverted (first item used to get the newest date) after
+    /// on-device testing: the FIRST item being newest was based on an
+    /// ASSUMED "Instagram's picker sorts most-recent-first" that turned
+    /// out to be backwards -- verified on device, the picker actually
+    /// showed the LAST-saved photo (whichever had the highest
+    /// creationDate) first, so the post's photo 1 (which needs to appear
+    /// first when the user taps through the picker) has to be the OLDEST
+    /// of the batch, not the newest. With no album to search, this
+    /// ordering is still what makes the post identifiable as a
+    /// contiguous block at all (see the MARK above) -- only WHICH END is
+    /// newest changed, not that they're staggered and contiguous. Dates
+    /// are anchored to `Date()` at call time (the newest one, now the
+    /// LAST item, sits exactly at `Date()`), not backdated, so the
+    /// photos don't bury themselves somewhere back in the user's camera
+    /// roll.
     ///
     /// `expectedCount` is HandoffView's sessionStore.post.count -- the
     /// number of photos the user actually chose. `items` is built via a
@@ -383,9 +396,7 @@ final class ExportService {
                 let resourceOptions = PHAssetResourceCreationOptions()
                 resourceOptions.uniformTypeIdentifier = UTType.jpeg.identifier
                 creationRequest.addResource(with: .photo, data: data, options: resourceOptions)
-                // index 0 (carousel position 1) gets the MOST RECENT date
-                // -- see exportToPhotos' doc comment.
-                creationRequest.creationDate = referenceDate.addingTimeInterval(-Double(index))
+                creationRequest.creationDate = Self.creationDate(forIndex: index, count: rendered.count, referenceDate: referenceDate)
             }
         }
 
@@ -394,6 +405,25 @@ final class ExportService {
             print("[export] WARNING: performChanges invoked its change block \(counter.count) times for ONE saveAll call -- this is almost certainly why duplicates appeared in the camera roll")
         }
         #endif
+    }
+
+    /// Pure and separately testable on purpose -- this exact formula was
+    /// wrong once already (the first version handed index 0 the newest
+    /// date, backwards, per an assumption about Instagram's picker order
+    /// that turned out to be false; see exportToPhotos' doc comment for
+    /// the on-device correction). `internal`, not `private`, specifically
+    /// so a unit test can call it directly without touching
+    /// PHPhotoLibrary at all.
+    ///
+    /// index 0 (carousel position 1, the post's first photo) gets the
+    /// OLDEST date; the LAST index gets `referenceDate` itself, i.e. the
+    /// newest. Verified on device: Instagram's picker shows the
+    /// highest-creationDate asset first, so the photo that needs to
+    /// appear first when the user taps through the picker has to be the
+    /// OLDEST of the batch, not the newest.
+    nonisolated static func creationDate(forIndex index: Int, count: Int, referenceDate: Date) -> Date {
+        let secondsBeforeNewest = Double(max(count - 1 - index, 0))
+        return referenceDate.addingTimeInterval(-secondsBeforeNewest)
     }
 
     private static func describe(_ error: Error) -> String {
