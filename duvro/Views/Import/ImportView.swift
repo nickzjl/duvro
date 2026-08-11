@@ -6,6 +6,22 @@
 import SwiftUI
 
 struct ImportView: View {
+    /// Phase 8.5 (welcome screen): Import is no longer the app's root --
+    /// welcome is (UI_NOTES §6: every screen after welcome gets a back
+    /// control). Called by `topBar`'s chevron; RootFlowView supplies the
+    /// real behavior (return to WelcomeView), matching every other
+    /// closure-based navigation callback in this codebase.
+    var onBack: () -> Void
+    /// "see how it works" on the welcome screen sets this -- on appear,
+    /// loads the same DEBUG fixture the "vibe select" button already
+    /// proves works end-to-end and jumps straight to VibeSelectionView,
+    /// skipping the need for a real 20-photo import. DEBUG-only
+    /// functionally (see the .task below): the real bundled demo assets
+    /// this is meant to use don't exist yet, so in Release this flag is
+    /// accepted but does nothing -- flagged in the session report rather
+    /// than faked.
+    var startInDemoMode: Bool = false
+
     @State private var importService = PhotoImportService()
     @State private var isPickerPresented = false
     /// Owns photos/scores/shortlist/chosenSelection/runnerUps once they
@@ -91,7 +107,19 @@ struct ImportView: View {
             #if DEBUG
             debugOverlay
             #endif
+
+            topBar
         }
+        #if DEBUG
+        .task {
+            // "see how it works" (welcome screen) -- same real pipeline
+            // the "vibe select" debug button already proves works
+            // end-to-end, just triggered on appear instead of by a tap.
+            guard startInDemoMode else { return }
+            guard loadFixtureIntoSessionStore() != nil else { return }
+            showVibeSelectDebug = true
+        }
+        #endif
         .sheet(isPresented: $isPickerPresented) {
             PhotoPicker(selectionLimit: maximumPhotos) { results in
                 isPickerPresented = false
@@ -345,6 +373,23 @@ struct ImportView: View {
         }
     }
     #endif
+
+    /// UI_NOTES §6: every screen after welcome gets a back control.
+    /// Present regardless of emptyState/grid -- same 44x44 chevron
+    /// treatment EditFlowView/VibeSelectionView already use.
+    private var topBar: some View {
+        HStack {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color(hex: "171614"))
+                    .frame(width: 44, height: 44)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+    }
 
     private var emptyState: some View {
         VStack(spacing: 16) {
@@ -641,5 +686,5 @@ struct ImportView: View {
 }
 
 #Preview {
-    ImportView()
+    ImportView(onBack: {})
 }

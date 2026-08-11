@@ -15,11 +15,66 @@ struct duvroApp: App {
             if let screen = DebugLaunch.screen {
                 DebugLaunchRootView(screen: screen)
             } else {
-                ImportView()
+                RootFlowView()
             }
             #else
-            ImportView()
+            RootFlowView()
             #endif
+        }
+    }
+}
+
+/// Phase 8.5 (welcome screen, fell through the phase checklist -- see
+/// BUILD_ROADMAP's doc fix, same session): welcome is now the real root
+/// (prd.md §4 step 1); "start a new chapter" advances to ImportView,
+/// which gained a back control (UI_NOTES §6) to return here. Simple
+/// state-driven swap, not a NavigationStack -- consistent with the rest
+/// of this app, which doesn't use one anywhere else, for a single
+/// transition that doesn't need one.
+struct RootFlowView: View {
+    @State private var showImport = false
+    @State private var demoMode = false
+
+    var body: some View {
+        if showImport {
+            ImportView(
+                onBack: {
+                    showImport = false
+                    demoMode = false
+                },
+                startInDemoMode: demoMode
+            )
+        } else {
+            WelcomeView(
+                samplePhotos: {
+                    #if DEBUG
+                    return DebugWelcomePhotos.samplePhotos()
+                    #else
+                    // The ~3 real bundled sample photos this needs don't
+                    // exist yet (BUILD_ROADMAP's Deferred work register)
+                    // -- WelcomeView fails safe on an empty array (empty
+                    // placeholder print frames, no crash), same as
+                    // PackPreviewSheet's own placeholder handling.
+                    return []
+                    #endif
+                }(),
+                onStartNewChapter: {
+                    demoMode = false
+                    showImport = true
+                },
+                onSeeHowItWorks: {
+                    // DEBUG-only functional (see ImportView's
+                    // startInDemoMode handling) -- the real bundled demo
+                    // assets prd.md §4 step 1 specs for this button don't
+                    // exist yet. In Release this still navigates to
+                    // ImportView, but startInDemoMode does nothing there
+                    // (no DEBUG fixture to load), so the button is
+                    // effectively unwired in Release. Flagged in the
+                    // session report rather than faked.
+                    demoMode = true
+                    showImport = true
+                }
+            )
         }
     }
 }
@@ -44,6 +99,12 @@ enum DebugLaunchScreen: String {
     /// chains forward into editFlow -> finalReview -> handoff, same
     /// one-way pattern as every other entry point in this file.
     case vibeSelect
+    /// Phase 8.5: lands directly on WelcomeView, bypassing RootFlowView's
+    /// state machine (its "start a new chapter"/"see how it works"
+    /// closures are no-ops here, matching packPreview's onUseThisVibe
+    /// convention) -- this is purely for screenshotting the screen
+    /// itself.
+    case welcome
 }
 
 enum DebugLaunch {
@@ -91,12 +152,14 @@ struct DebugLaunchRootView: View {
             if loaded, let shortlist = sessionStore.shortlist {
                 if screen == .vibeSelect {
                     vibeSelectDestination()
+                } else if screen == .welcome {
+                    welcomeDestination()
                 } else if case .success(let pack) = VibePackLoader.load(named: packNameToLoad) {
                     switch screen {
                     case .packPreview:
                         packPreviewDestination(pack: pack)
-                    case .vibeSelect:
-                        EmptyView() // unreachable -- handled above, before this branch is ever entered
+                    case .vibeSelect, .welcome:
+                        EmptyView() // unreachable -- both handled above, before this branch is ever entered
                     case .editFlow:
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack)
@@ -158,14 +221,14 @@ struct DebugLaunchRootView: View {
     /// editFlow/finalReview keep their EXACT prior hardcoded value
     /// ("golden_hour") -- only packPreview's choice is dynamic. Computed
     /// once here rather than duplicating the literal in two places.
-    /// Never actually called for .vibeSelect (that branch short-circuits
-    /// in `body` before reaching this), but the switch still has to be
-    /// exhaustive over DebugLaunchScreen.
+    /// Never actually called for .vibeSelect or .welcome (both branches
+    /// short-circuit in `body` before reaching this), but the switch
+    /// still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
         case .editFlow, .finalReview: return "golden_hour"
         case .packPreview: return DebugLaunch.packName
-        case .vibeSelect: return "golden_hour"
+        case .vibeSelect, .welcome: return "golden_hour"
         }
     }
 
@@ -229,6 +292,19 @@ struct DebugLaunchRootView: View {
                 )
             }
         }
+    }
+
+    /// Phase 8.5. Lands directly on WelcomeView -- the closures are
+    /// no-ops, same convention as packPreviewDestination's
+    /// `onUseThisVibe: {}`, since this launch path exists purely for
+    /// screenshotting the screen's INITIAL appearance, not its
+    /// interactive navigation (which needs a tap simctl can't send).
+    private func welcomeDestination() -> some View {
+        WelcomeView(
+            samplePhotos: DebugWelcomePhotos.samplePhotos(),
+            onStartNewChapter: {},
+            onSeeHowItWorks: {}
+        )
     }
 
     private func fallback(_ shortlist: ShortlistResult) -> some View {
