@@ -57,6 +57,22 @@ struct ImportView: View {
     @State private var showHandoffDebug = false
     @State private var loadedPack: VibePack?
     @State private var packLoadError: VibePackLoadError?
+    /// "vibe select"/"preview": the same gap the edit/review buttons above
+    /// closed for EditFlowView/FinalReviewView a few sessions ago --
+    /// VibeSelectionView and PackPreviewSheet were previously reachable
+    /// ONLY via `-duvroDebugScreen vibeSelect`/`packPreview`, which can't
+    /// be typed from the phone itself. "vibe select" pushes the real
+    /// screen with the fixture loaded, chaining into editFlow ->
+    /// finalReview -> handoff on "use this vibe" (its OWN chain, separate
+    /// from "edit"/"review"'s, since the pack is chosen dynamically here
+    /// rather than always golden_hour). "preview" jumps straight to
+    /// PackPreviewSheet (golden_hour, same as "edit"/"review") for
+    /// testing that screen in isolation.
+    @State private var showVibeSelectDebug = false
+    @State private var vibeSelectDebugResult: (pack: VibePack, count: Int)?
+    @State private var showVibeSelectDebugFinalReview = false
+    @State private var showVibeSelectDebugHandoff = false
+    @State private var showPackPreviewDebug = false
     #endif
 
     private let minimumPhotos = 20
@@ -161,6 +177,19 @@ struct ImportView: View {
         .fullScreenCover(isPresented: $showHandoffDebug) {
             debugFlowDestination {
                 HandoffView(sessionStore: sessionStore, pack: $0)
+            }
+        }
+        .fullScreenCover(isPresented: $showVibeSelectDebug) {
+            vibeSelectDebugDestination()
+        }
+        .sheet(isPresented: $showPackPreviewDebug) {
+            debugFlowDestination { pack in
+                PackPreviewSheet(
+                    pack: pack,
+                    samplePhotos: DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos),
+                    onUseThisVibe: {}
+                )
+                .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
             }
         }
         #endif
@@ -270,6 +299,49 @@ struct ImportView: View {
             }
         } else {
             ProgressView()
+        }
+    }
+
+    /// "vibe select" button's destination. `vibeSelectDebugResult == nil`:
+    /// still showing VibeSelectionView itself. Once set (its "use this
+    /// vibe" fired), chains into editFlow -> finalReview -> handoff --
+    /// same one-way pattern as duvroApp's own vibeSelectDestination and
+    /// this file's "edit"/"review" chain, just with dedicated state so it
+    /// doesn't collide with either of those (this one's pack is whatever
+    /// the user actually tapped, not always golden_hour).
+    @ViewBuilder
+    private func vibeSelectDebugDestination() -> some View {
+        if let vibeSelectDebugResult {
+            if showVibeSelectDebugHandoff {
+                HandoffView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack)
+            } else if showVibeSelectDebugFinalReview {
+                FinalReviewView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
+                    showVibeSelectDebugHandoff = true
+                }
+            } else {
+                EditFlowView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
+                    showVibeSelectDebugFinalReview = true
+                }
+            }
+        } else {
+            VibeSelectionView(
+                sessionStore: sessionStore,
+                samplePhotos: { pack in DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos) },
+                onVibeSelected: { pack, count in
+                    // Same real pipeline as loadFixtureIntoSessionStore's
+                    // own calls, just against the user's resolved count
+                    // instead of the default 7 -- sessionStore.scores is
+                    // already the fixture's fabricated scores by this
+                    // point ("vibe select" calls loadFixtureIntoSessionStore
+                    // before presenting this view).
+                    let shortlist = ShortlistService.buildShortlist(from: sessionStore.scores)
+                    sessionStore.setShortlist(shortlist)
+                    let chosen = FallbackSelectionService.select(from: shortlist, count: count)
+                    sessionStore.setChosenSelection(chosen)
+                    sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+                    vibeSelectDebugResult = (pack, count)
+                }
+            )
         }
     }
     #endif
@@ -475,6 +547,28 @@ struct ImportView: View {
                     Button("review") {
                         guard loadFixtureIntoSessionStore() != nil else { return }
                         loadPackAndShow { showFinalReviewDebug = true }
+                    }
+
+                    // Pushes the REAL VibeSelectionView (photo count + all
+                    // 3 pack cards) with the fixture loaded -- previously
+                    // only reachable via `-duvroDebugScreen vibeSelect`.
+                    // "use this vibe" inside its pack-preview sheet chains
+                    // into editFlow -> finalReview -> handoff, same as
+                    // "edit" above, but with whichever pack was actually
+                    // tapped rather than always golden_hour.
+                    Button("vibe select") {
+                        guard loadFixtureIntoSessionStore() != nil else { return }
+                        showVibeSelectDebug = true
+                    }
+
+                    // Jumps straight to PackPreviewSheet (golden_hour) --
+                    // previously only reachable via `-duvroDebugScreen
+                    // packPreview`. For testing the sheet itself (sample
+                    // grid, quote, "use this vibe"/"cancel") in isolation,
+                    // without going through the vibe-select screen first.
+                    Button("preview") {
+                        guard loadFixtureIntoSessionStore() != nil else { return }
+                        loadPackAndShow { showPackPreviewDebug = true }
                     }
                 }
             }
