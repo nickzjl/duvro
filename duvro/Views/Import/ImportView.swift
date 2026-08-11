@@ -391,6 +391,24 @@ struct ImportView: View {
             .padding(.top, 64)
             .padding(.bottom, 40)
         }
+        #if DEBUG
+        // Layering fix: debugScoringControls used to live in debugOverlay,
+        // a separate ZStack layer painted AFTER (on top of) grid -- which
+        // put it in the exact same bottom screen region as continueButton
+        // below and fully covered it, in any DEBUG build with 20+ photos
+        // imported (confirmed on-device). Chaining it as its OWN
+        // safeAreaInset here, applied BEFORE continueButton's, stacks it
+        // just above the CTA instead of on top of it -- chained
+        // safeAreaInsets compose outward, so the LAST one applied
+        // (continueButton, below) ends up closest to the true bottom
+        // edge, matching every other primary CTA in the app.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !importService.photos.isEmpty {
+                debugScoringControls
+                    .preferredColorScheme(.light) // same scoped light-lock debugOverlay used to apply
+            }
+        }
+        #endif
         // Phase 8, Task 4: "wire into the real flow after import" -- the
         // only way to reach VibeSelectionView outside DEBUG launch
         // arguments/buttons. safeAreaInset (not a fixed padding guess)
@@ -445,6 +463,11 @@ struct ImportView: View {
     }
 
     #if DEBUG
+    /// Memory badge only now -- debugScoringControls moved to `grid`'s own
+    /// safeAreaInset chain (see the layering-fix comment there) so it no
+    /// longer paints over continueButton. This layer still spans the full
+    /// screen (VStack + Spacer), but only the top-right badge has visible
+    /// content, same as before.
     private var debugOverlay: some View {
         VStack {
             HStack {
@@ -459,9 +482,6 @@ struct ImportView: View {
                     .padding(.trailing, 8)
             }
             Spacer()
-            if !importService.photos.isEmpty {
-                debugScoringControls
-            }
         }
         .preferredColorScheme(.light)
     }
