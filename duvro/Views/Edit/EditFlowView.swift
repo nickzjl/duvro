@@ -206,6 +206,16 @@ struct EditFlowView: View {
                     Text(variant.name.lowercased())
                         .font(.duvroVariantLabel)
                         .foregroundStyle(isSelected ? Color(hex: "A04021") : Color(hex: "777169"))
+                        .multilineTextAlignment(.center)
+                        // reservesSpace: true -- every pill reserves room for
+                        // 2 lines regardless of whether ITS OWN name needs
+                        // one or two, so "kodak style"/"deep teal" (1 line)
+                        // and "faded postcard" (wraps to 2) end up the exact
+                        // same height in the same row. Not a truncation
+                        // limit in practice: nothing today needs a 3rd line,
+                        // so this only ever affects HEIGHT, never hides text
+                        // (UI_NOTES fix 3 -- do not truncate).
+                        .lineLimit(2, reservesSpace: true)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
                         .frame(maxWidth: .infinity)
