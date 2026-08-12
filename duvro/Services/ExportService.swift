@@ -384,12 +384,23 @@ final class ExportService {
         // across however many times it's actually called.
         final class InvocationCounter: @unchecked Sendable { var count = 0 }
         let counter = InvocationCounter()
+        // Instagram-picker-order investigation (session report): captures
+        // each PHAssetCreationRequest's placeholder localIdentifier so the
+        // block below can fetch back the EXACT assets this call created --
+        // not a blind "N most recent" fetch, which could be fooled by
+        // something else touching the library in the same window. Reset
+        // on every performChanges invocation (not appended-to) so if the
+        // block DOES run more than once, only the ids from whichever
+        // invocation actually persists are the ones logged.
+        final class PlaceholderCollector: @unchecked Sendable { var ids: [String] = [] }
+        let placeholders = PlaceholderCollector()
         #endif
 
         try await PHPhotoLibrary.shared().performChanges {
             #if DEBUG
             counter.count += 1
             print("[export] saveAll's performChanges block invoked (call #\(counter.count)) -- creating \(rendered.count) assets")
+            placeholders.ids.removeAll()
             #endif
             for (index, data) in rendered.enumerated() {
                 let creationRequest = PHAssetCreationRequest.forAsset()
@@ -397,12 +408,40 @@ final class ExportService {
                 resourceOptions.uniformTypeIdentifier = UTType.jpeg.identifier
                 creationRequest.addResource(with: .photo, data: data, options: resourceOptions)
                 creationRequest.creationDate = Self.creationDate(forIndex: index, count: rendered.count, referenceDate: referenceDate)
+                #if DEBUG
+                if let placeholder = creationRequest.placeholderForCreatedAsset {
+                    placeholders.ids.append(placeholder.localIdentifier)
+                }
+                #endif
             }
         }
 
         #if DEBUG
         if counter.count > 1 {
             print("[export] WARNING: performChanges invoked its change block \(counter.count) times for ONE saveAll call -- this is almost certainly why duplicates appeared in the camera roll")
+        }
+        // Fetches back exactly what just persisted and logs each asset's
+        // ACTUAL creationDate, sorted -- answers two things neither prior
+        // diagnostic could: (1) did exactly `rendered.count` assets land
+        // in the library, not more (the open half of the "14 duplicate
+        // assets" question -- the counter above catches the block running
+        // twice, but not a single invocation somehow producing extra
+        // assets); (2) did the requested creationDate actually persist,
+        // or did something between the request and the committed asset
+        // drop/alter it. Neither confirms or denies what Instagram's OWN
+        // picker sorts by -- that's third-party behavior with no
+        // programmatic visibility from here -- but it rules in or out
+        // whether duvro's own half of the mechanism (asset count, staged
+        // dates) is actually correct, which the "two inversions both
+        // failed" history has never actually confirmed either way.
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: placeholders.ids, options: nil)
+        print("[export] saveAll created \(fetchResult.count) asset(s) (requested \(rendered.count), \(placeholders.ids.count) placeholders captured)")
+        var persisted: [(id: String, date: Date?)] = []
+        fetchResult.enumerateObjects { asset, _, _ in
+            persisted.append((asset.localIdentifier, asset.creationDate))
+        }
+        for entry in persisted.sorted(by: { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }) {
+            print("[export]   \(entry.id.prefix(8))… creationDate=\(entry.date.map(String.init(describing:)) ?? "nil")")
         }
         #endif
     }
