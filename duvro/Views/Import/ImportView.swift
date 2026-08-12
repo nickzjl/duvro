@@ -33,15 +33,29 @@ struct ImportView: View {
     @State private var sessionStore = SessionStore()
 
     // MARK: - Phase 8, Task 4: the real (non-DEBUG) post-import flow
-    /// Shown once sessionStore.photos.count >= minimumPhotos (see `grid`'s
+    /// ONE persistent fullScreenCover for the whole real flow -- shown
+    /// once sessionStore.photos.count >= minimumPhotos (see `grid`'s
     /// safeAreaInset below) -- "wire into the real flow after import."
+    ///
+    /// Task 1 (white-screen bug) fix: this used to be FOUR separate
+    /// fullScreenCover bindings (showVibeSelect, showEditFlowReal,
+    /// showFinalReviewReal, showHandoffReal), and handleVibeSelected
+    /// dismissed one (showVibeSelect = false) while presenting a sibling
+    /// (showEditFlowReal = true) IN THE SAME synchronous callback that
+    /// itself fired from inside PackPreviewSheet's own dismiss() call one
+    /// frame earlier -- three presentation-layer transitions racing in
+    /// one tick (sheet dismissing, fullScreenCover A dismissing,
+    /// fullScreenCover B presenting, all from the same ImportView).
+    /// UIKit does not crash on "present while dismissing," it silently
+    /// drops or stalls the new presentation, which is exactly a white
+    /// screen with the app still alive. showVibeSelect now stays TRUE for
+    /// the entire real flow (vibe select through handoff); `realFlowPack`
+    /// and the two flags below only change what `realFlowDestination()`
+    /// renders INSIDE that one still-presented cover -- the exact pattern
+    /// `vibeSelectDebugDestination()` below already used and the user
+    /// confirmed works end-to-end on device.
     @State private var showVibeSelect = false
-    /// Set once VibeSelectionView's "use this vibe" hands off; chains into
-    /// editFlow -> finalReview -> handoff via the three flags below, same
-    /// one-way pattern as duvroApp's -duvroDebugScreen chaining and the
-    /// DEBUG "edit"/"review" buttons further down this file.
     @State private var realFlowPack: VibePack?
-    @State private var showEditFlowReal = false
     @State private var showFinalReviewReal = false
     @State private var showHandoffReal = false
     /// Set when "use this vibe" is tapped before any photo has been
@@ -222,8 +236,59 @@ struct ImportView: View {
         }
         #endif
         // MARK: Phase 8, Task 4: real (non-DEBUG) flow -- compiled in every
-        // configuration, unlike the block above.
+        // configuration, unlike the block above. ONE fullScreenCover for
+        // the whole flow (Task 1 fix -- see showVibeSelect's doc comment).
         .fullScreenCover(isPresented: $showVibeSelect) {
+            realFlowDestination()
+                // Attached HERE, inside the presented cover's own content,
+                // not on ImportView's outer body -- an .alert modifier on
+                // an ancestor that's currently COVERED by a fullScreenCover
+                // presents from a view controller that isn't topmost, which
+                // is the same "present from underneath an active
+                // presentation" problem this task's fix addresses above.
+                // Verified by reasoning (matches SwiftUI's own guidance:
+                // attach presentation modifiers to the view that's actually
+                // visible when they fire), not by an interactive repro --
+                // see the session report.
+                .alert("can't curate yet", isPresented: Binding(
+                    get: { vibeSelectBlockedMessage != nil },
+                    set: { if !$0 { vibeSelectBlockedMessage = nil } }
+                )) {
+                    Button("ok") {}
+                } message: {
+                    Text(vibeSelectBlockedMessage ?? "")
+                }
+        }
+    }
+
+    /// Content of the real flow's ONE fullScreenCover. `realFlowPack ==
+    /// nil`: still showing VibeSelectionView itself. Once set ("use this
+    /// vibe" fired), chains forward into editFlow -> finalReview ->
+    /// handoff by swapping THIS function's output -- the cover itself
+    /// (showVibeSelect) never toggles again until the user backs all the
+    /// way out. Exact same structure as vibeSelectDebugDestination()
+    /// below, which the user confirmed already works end-to-end on
+    /// device; this is that pattern applied to the real (non-DEBUG) path,
+    /// which previously used four separate fullScreenCovers instead (the
+    /// Task 1 bug).
+    @ViewBuilder
+    private func realFlowDestination() -> some View {
+        if let realFlowPack {
+            if showHandoffReal {
+                HandoffView(sessionStore: sessionStore, pack: realFlowPack)
+            } else if showFinalReviewReal {
+                FinalReviewView(sessionStore: sessionStore, pack: realFlowPack) {
+                    // PHASE 9 INSERTION POINT: same as the DEBUG chain below --
+                    // Final Review -> Caption -> Handoff once Caption exists.
+                    showFinalReviewReal = false
+                    showHandoffReal = true
+                }
+            } else {
+                EditFlowView(sessionStore: sessionStore, pack: realFlowPack) {
+                    showFinalReviewReal = true
+                }
+            }
+        } else {
             VibeSelectionView(
                 sessionStore: sessionStore,
                 samplePhotos: { pack in
@@ -244,37 +309,6 @@ struct ImportView: View {
                 onVibeSelected: handleVibeSelected
             )
         }
-        .fullScreenCover(isPresented: $showEditFlowReal) {
-            if let realFlowPack {
-                EditFlowView(sessionStore: sessionStore, pack: realFlowPack) {
-                    showEditFlowReal = false
-                    showFinalReviewReal = true
-                }
-            }
-        }
-        .fullScreenCover(isPresented: $showFinalReviewReal) {
-            if let realFlowPack {
-                FinalReviewView(sessionStore: sessionStore, pack: realFlowPack) {
-                    // PHASE 9 INSERTION POINT: same as the DEBUG chain above --
-                    // Final Review -> Caption -> Handoff once Caption exists.
-                    showFinalReviewReal = false
-                    showHandoffReal = true
-                }
-            }
-        }
-        .fullScreenCover(isPresented: $showHandoffReal) {
-            if let realFlowPack {
-                HandoffView(sessionStore: sessionStore, pack: realFlowPack)
-            }
-        }
-        .alert("can't curate yet", isPresented: Binding(
-            get: { vibeSelectBlockedMessage != nil },
-            set: { if !$0 { vibeSelectBlockedMessage = nil } }
-        )) {
-            Button("ok") {}
-        } message: {
-            Text(vibeSelectBlockedMessage ?? "")
-        }
     }
 
     /// The real (non-DEBUG) "use this vibe" hand-off -- Task 4 spec:
@@ -288,6 +322,14 @@ struct ImportView: View {
     /// PHASE 9/10 CURATION INSERTION POINT: prd.md §4 steps 5-6 ("curation
     /// progress" / "curation showcase") aren't built this session --
     /// EditFlowView opens directly instead of passing through them first.
+    ///
+    /// Task 1 fix: only sets `realFlowPack` now -- does NOT touch
+    /// showVibeSelect. The cover stays presented; realFlowDestination()
+    /// reacts to realFlowPack changing and swaps its content. Previously
+    /// this also set showVibeSelect = false (dismiss) and a separate
+    /// showEditFlowReal = true (present) in the same call, which raced
+    /// against PackPreviewSheet's own dismiss() one frame earlier -- see
+    /// showVibeSelect's doc comment for the full diagnosis.
     private func handleVibeSelected(pack: VibePack, count: Int) {
         guard !sessionStore.scores.isEmpty else {
             // Expected today outside DEBUG tooling: ScoringService is #if
@@ -303,8 +345,6 @@ struct ImportView: View {
         sessionStore.setChosenSelection(chosen)
         sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
         realFlowPack = pack
-        showVibeSelect = false
-        showEditFlowReal = true
     }
 
     #if DEBUG
@@ -468,6 +508,13 @@ struct ImportView: View {
 
     private var continueButton: some View {
         Button {
+            // Defensive reset -- not currently reachable (nothing lets a
+            // user get back to ImportView from deeper in the real flow
+            // yet), but cheap insurance against a stale realFlowPack from
+            // a prior run if that ever changes.
+            realFlowPack = nil
+            showFinalReviewReal = false
+            showHandoffReal = false
             showVibeSelect = true
         } label: {
             Text("choose your vibe")
