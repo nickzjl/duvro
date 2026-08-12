@@ -23,13 +23,12 @@
 //      "see how it works" added, required so App Review can evaluate the
 //      app without a populated photo library.
 //
-//  PLACEHOLDER IMAGERY: the ~3 bundled sample photos this screen's card
-//  stack (and "see how it works") are meant to ship with don't exist yet
-//  -- nobody has shot them (BUILD_ROADMAP's Deferred work register, same
-//  blocker as the pack preview sheet's sample images). `samplePhotos` is
-//  plain [UIImage] with no idea where they came from -- the caller
-//  decides (DebugWelcomePhotos.swift in DEBUG, empty in Release).
-//  Anywhere from 0 to 3+ images is handled gracefully, not assumed away.
+//  SAMPLE IMAGERY: the card stack's 3 photos are real bundled product
+//  content (SampleAssets/Welcome/, part of every build configuration
+//  including Release -- see SampleAssets.swift), not a DEBUG-only
+//  placeholder. Each of `samplePhotos`' 3 slots is independently optional
+//  so a missing image (a bundle lookup failure) degrades to an empty
+//  print frame for just that card rather than losing the whole stack.
 //
 //  Do NOT add the app-wide film grain overlay here -- separate deferred
 //  item (UI_NOTES §1), not part of this screen's build.
@@ -38,9 +37,9 @@
 import SwiftUI
 
 struct WelcomeView: View {
-    /// Up to 3 used, front-to-back per `cardStack`. Placeholder-sourced --
-    /// see the file header.
-    let samplePhotos: [UIImage]
+    /// Named, not positional -- see SampleAssets.welcomePhotos() for which
+    /// image was matched to which slot and why.
+    let samplePhotos: SampleAssets.WelcomePhotos
     var onStartNewChapter: () -> Void
     var onSeeHowItWorks: () -> Void
 
@@ -78,26 +77,39 @@ struct WelcomeView: View {
         .multilineTextAlignment(.center)
     }
 
-    // MARK: - Photo card stack (UI_NOTES §4's print-bordered card treatment)
+    // MARK: - Photo card stack (design/01_welcome.png)
 
-    /// Rotation values are 3 of the 4 UI_NOTES §4 specifies for the
-    /// curation-progress shuffle (-10°/-5°/0°/+10°) -- that spec is for a
-    /// 4-position ANIMATED stack; this one is static with 3 cards, so it
-    /// reuses -10°/0°/+10° (front card upright, per that same section's
-    /// "a loose stack, front card upright") rather than inventing new
-    /// values for a different card count.
+    /// Rebuilt to match design/01_welcome.png directly (the prior version
+    /// used UI_NOTES §4's curation-progress shuffle angles/spacing, which
+    /// reads as a much looser, smaller-spread stack than this mockup
+    /// actually shows) -- geometry below is read off the mockup image
+    /// itself, then adjusted by screenshot comparison, per this session's
+    /// own instruction. Named constants so a future pass can nudge any one
+    /// card without re-deriving the whole stack.
+    private enum CardGeometry {
+        static let back = (rotation: -8.0, offset: CGSize(width: -50, height: -85), size: CGSize(width: 160, height: 200))
+        static let middle = (rotation: 7.0, offset: CGSize(width: 46, height: -18), size: CGSize(width: 176, height: 220))
+        static let front = (rotation: -2.0, offset: CGSize(width: 0, height: 50), size: CGSize(width: 250, height: 312))
+    }
+
     private var cardStack: some View {
         ZStack {
-            printCard(image(at: 1), rotation: -10, offset: CGSize(width: -30, height: -8), size: CGSize(width: 200, height: 250))
-            printCard(image(at: 2), rotation: 10, offset: CGSize(width: 28, height: -4), size: CGSize(width: 200, height: 250))
-            printCard(image(at: 0), rotation: 0, offset: .zero, size: CGSize(width: 232, height: 290))
+            printCard(samplePhotos.back, rotation: CardGeometry.back.rotation, offset: CardGeometry.back.offset, size: CardGeometry.back.size)
+            printCard(samplePhotos.middle, rotation: CardGeometry.middle.rotation, offset: CardGeometry.middle.offset, size: CardGeometry.middle.size)
+            printCard(samplePhotos.front, rotation: CardGeometry.front.rotation, offset: CardGeometry.front.offset, size: CardGeometry.front.size)
         }
-        .frame(height: 320)
+        .frame(height: 380)
         .frame(maxWidth: .infinity)
     }
 
-    private func image(at index: Int) -> UIImage? {
-        samplePhotos.indices.contains(index) ? samplePhotos[index] : nil
+    /// Thin equal border on the sides/top, noticeably thicker on the
+    /// bottom -- a real print border, confirmed against the mockup (not
+    /// the prior version's uniform padding on all four sides). Same
+    /// asymmetric-border idea as the Digicam Polaroid EditOp, expressed
+    /// here as UI chrome rather than baked into pixels.
+    private enum PrintBorder {
+        static let side: CGFloat = 8
+        static let bottom: CGFloat = 26
     }
 
     private func printCard(_ image: UIImage?, rotation: Double, offset: CGSize, size: CGSize) -> some View {
@@ -107,18 +119,19 @@ struct WelcomeView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                // No placeholder image available (Release, or fewer than
-                // 3 DebugFixture photos) -- a muted empty print frame,
-                // not a blank gap or a crash.
+                // No sample image available (a bundle lookup failure) --
+                // a muted empty print frame, not a blank gap or a crash.
                 Color(hex: "EEE9DF")
             }
         }
         .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .padding(10)
+        .padding(.horizontal, PrintBorder.side)
+        .padding(.top, PrintBorder.side)
+        .padding(.bottom, PrintBorder.bottom)
         .background(Color(hex: "FFFCF7"))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 18, x: 0, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .shadow(color: .black.opacity(0.1), radius: 14, x: 0, y: 6)
         .rotationEffect(.degrees(rotation))
         .offset(offset)
     }
@@ -160,5 +173,5 @@ struct WelcomeView: View {
 }
 
 #Preview {
-    WelcomeView(samplePhotos: [], onStartNewChapter: {}, onSeeHowItWorks: {})
+    WelcomeView(samplePhotos: SampleAssets.welcomePhotos(), onStartNewChapter: {}, onSeeHowItWorks: {})
 }

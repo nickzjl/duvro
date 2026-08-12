@@ -13,14 +13,12 @@
 //  screenshotting this file on its own, since simctl can't tap a card to
 //  reach a sheet that's normally one tap away).
 //
-//  BLOCKER, routed around rather than solved (flagged per this session's
-//  instructions): the ~18 real bundled sample photos this screen is
-//  ultimately meant to ship with don't exist yet -- nobody has shot them
-//  (BUILD_ROADMAP's Deferred work register). `samplePhotos` is just
-//  `[Photo]`, with no knowledge of where they came from, SPECIFICALLY so
-//  swapping DebugFixture placeholders for real bundled images later is a
-//  change to the CALLER (DebugPackPreviewPhotos.swift, or its Release
-//  replacement), not to this file.
+//  SAMPLE PHOTOS: `samplePhotos` is just `[Photo]`, with no knowledge of
+//  where they came from -- the caller (SampleAssets.packPreviewPhotos(for:),
+//  real bundled product content as of this session) decides. This view
+//  stays decoupled from that on purpose, same reasoning as before real
+//  images existed: swapping the source later is a change to the caller,
+//  not to this file.
 //
 //  CACHING (Phase 8 acceptance: "previews load instantly"): renders are
 //  cached in PackPreviewRenderCache, which lives outside this view's own
@@ -114,21 +112,21 @@ struct PackPreviewSheet: View {
             let topRowHeight = geo.size.height * 0.66
             let bottomRowHeight = geo.size.height - topRowHeight - spacing
             let stackedTileHeight = (topRowHeight - spacing) / 2
+            let bottomTileWidth = (geo.size.width - spacing) / 2
 
             VStack(spacing: spacing) {
                 HStack(alignment: .top, spacing: spacing) {
-                    tile(0)
-                        .frame(width: bigColumnWidth, height: topRowHeight)
+                    tile(0, size: CGSize(width: bigColumnWidth, height: topRowHeight))
                     VStack(spacing: spacing) {
-                        tile(1).frame(height: stackedTileHeight)
-                        tile(2).frame(height: stackedTileHeight)
+                        tile(1, size: CGSize(width: smallColumnWidth, height: stackedTileHeight))
+                        tile(2, size: CGSize(width: smallColumnWidth, height: stackedTileHeight))
                     }
                     .frame(width: smallColumnWidth, height: topRowHeight)
                 }
                 .frame(height: topRowHeight)
                 HStack(spacing: spacing) {
-                    tile(3).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    tile(4).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    tile(3, size: CGSize(width: bottomTileWidth, height: bottomRowHeight))
+                    tile(4, size: CGSize(width: bottomTileWidth, height: bottomRowHeight))
                 }
                 .frame(height: bottomRowHeight)
             }
@@ -145,7 +143,23 @@ struct PackPreviewSheet: View {
         .clipped() // belt-and-suspenders against the same overflow, regardless of cause
     }
 
-    private func tile(_ index: Int) -> some View {
+    /// `size` is applied INSIDE this function, before `.clipShape`/`.clipped`
+    /// -- not left to the caller to apply afterward. That ordering is load-
+    /// bearing, not stylistic: the previous version constrained size only
+    /// from the OUTSIDE (`tile(index).frame(width:height:)` at the call
+    /// site), with `.clipShape`/`.clipped()` applied INSIDE this function
+    /// first. A resizable, aspectRatio(.fill) Image's reported ideal size
+    /// before an explicit frame is applied can be very large (its own
+    /// native pixel dimensions, effectively unbounded relative to a small
+    /// grid tile) -- clipping against THAT size, then wrapping the already-
+    /// clipped result in a smaller outer frame, does not re-clip; it just
+    /// changes where the (already oversized) painted content is measured
+    /// from, which is what let real SampleAssets photos (varied native
+    /// aspect ratios, unlike the previous uniformly-shaped DebugFixture
+    /// placeholders) visibly spill outside their intended tile and overlap
+    /// neighbors. Applying the frame FIRST, then clipping, guarantees the
+    /// clip always happens at the final, correct size.
+    private func tile(_ index: Int, size: CGSize) -> some View {
         Group {
             if renderedImages.indices.contains(index) {
                 Image(uiImage: renderedImages[index])
@@ -162,7 +176,7 @@ struct PackPreviewSheet: View {
                 Color(hex: "EEE9DF")
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .clipped()
     }
