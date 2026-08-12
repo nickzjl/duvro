@@ -74,14 +74,22 @@ nonisolated enum EditEngine {
             image = apply(op, to: image) ?? image // a failed op is a no-op, not a chain abort
         }
 
-        let extent = sourceCIImage.extent
-        if let cgImage = sharedContext.createCGImage(image, from: extent) {
+        // Rasterize at the CHAIN'S OWN final extent, not the source's --
+        // most ops preserve the source extent, but polaroidFrame
+        // deliberately doesn't (its output extent is the 4:5 `window`, not
+        // the source's native-aspect bounds; see its doc comment). Reading
+        // an op's smaller extent through the SOURCE's larger rect would
+        // sample undefined space outside the image's actual content.
+        // sourceCIImage.extent remains the fallback for the rare op that
+        // returns something empty/infinite (defensive, not expected).
+        let renderExtent = (image.extent.isEmpty || image.extent.isInfinite) ? sourceCIImage.extent : image.extent
+        if let cgImage = sharedContext.createCGImage(image, from: renderExtent) {
             return UIImage(cgImage: cgImage)
         }
 
         // Full chain failed to render -- try the unedited source before
         // giving up entirely.
-        if let originalCGImage = sharedContext.createCGImage(sourceCIImage, from: extent) {
+        if let originalCGImage = sharedContext.createCGImage(sourceCIImage, from: sourceCIImage.extent) {
             return UIImage(cgImage: originalCGImage)
         }
         return photo.thumbnail
@@ -423,20 +431,33 @@ nonisolated enum EditEngine {
     }
 
     /// Composites the photo, shrunk to fit, onto a white Polaroid-style
-    /// frame with an asymmetric (thicker) bottom border. Returns an image
-    /// with the SAME extent as `image` -- it does not resize or reshape
-    /// the op chain's canvas, so render()'s and renderFullResJPEGData()'s
-    /// existing crop logic (both keyed off the SOURCE's own extent) keeps
-    /// working completely unmodified; this op fits into that contract
-    /// exactly like every other one in this file. Border/interior geometry
-    /// is computed against `centerCropRect(for: extent, aspectRatio: 4/5)`
-    /// -- the SAME window renderFullResJPEGData crops to after the op
-    /// chain runs -- rather than the full native extent, so the frame
-    /// reads correctly (centered, right proportions) once that crop
-    /// actually happens, regardless of the source photo's native aspect
-    /// ratio. Content outside that window is painted white too; it simply
-    /// gets cropped away downstream and never needs to look correct on its
-    /// own.
+    /// frame with an asymmetric (thicker) bottom border. Border/interior
+    /// geometry is computed against `centerCropRect(for: extent, aspectRatio:
+    /// 4/5)` -- the SAME window renderFullResJPEGData crops to after the op
+    /// chain runs -- so the frame reads correctly (centered, right
+    /// proportions) regardless of the source photo's native aspect ratio.
+    ///
+    /// UNLIKE every other op in this file, the returned image's extent is
+    /// `window` (the 4:5 rect), NOT the same extent as `image`. This was a
+    /// deliberate change from an earlier version that preserved the full
+    /// native extent and painted white outside `window` too, counting on
+    /// render()'s/renderFullResJPEGData()'s downstream 4:5 crop to trim it
+    /// away. That worked for the EXPORT path (renderFullResJPEGData does
+    /// perform that crop) but not the PREVIEW path: render() never crops at
+    /// the pixel level -- it counts on SwiftUI's
+    /// `Image(...).aspectRatio(4/5, contentMode: .fill).clipShape(...)` to
+    /// visually hide whatever falls outside a centered 4:5 window, and on
+    /// device that did NOT coincide with `window`'s own math, leaving the
+    /// outside-window white margin visible as a large, wrong, equal border
+    /// on every side (the bug this fix addresses). Every other op in this
+    /// file is a uniform pixel filter, so a crop mismatch there just shifts
+    /// which pixels show, invisibly -- polaroidFrame is the first op to
+    /// paint a hard white/photo boundary, which is what made the mismatch
+    /// visible at all. Cropping to `window` HERE removes the ambiguity at
+    /// the source: the returned image already IS the intended 4:5 photo,
+    /// so renderFullResJPEGData's downstream crop is a same-rect no-op, and
+    /// SwiftUI's fill-crop of an already-4:5 image can't mis-crop it either
+    /// (scale 1, nothing left to trim).
     private static func applyPolaroidFrame(borderWidth: Double, bottomBorderMultiplier: Double, to image: CIImage) -> CIImage? {
         let extent = image.extent
         guard !extent.isEmpty, !extent.isInfinite, extent.width > 0, extent.height > 0 else { return image }
@@ -458,7 +479,20 @@ nonisolated enum EditEngine {
         )
         guard interior.width > 0, interior.height > 0 else { return image }
 
-        let scale = min(interior.width / extent.width, interior.height / extent.height)
+        // Fill the interior, don't fit inside it. `min` (aspect-FIT) was
+        // the actual bug: for a source photo whose native aspect ratio
+        // doesn't match the interior's, fit leaves extra letterboxing
+        // INSIDE the interior on top of the intentional border -- e.g. a
+        // landscape source centered in a portrait interior picks up equal
+        // top+bottom padding roughly TWICE the size of the coded top/
+        // bottom borders, which reads as one big uniform white margin on
+        // every side (the reported bug) and washes out
+        // bottomBorderMultiplier's thicker-bottom effect entirely. `max`
+        // (aspect-FILL) scales the photo to cover the interior edge to
+        // edge -- excess on one axis gets cropped below, never padded --
+        // which is what makes a real Polaroid's photo fill most of the
+        // frame with only the coded border showing.
+        let scale = max(interior.width / extent.width, interior.height / extent.height)
         let scaledWidth = extent.width * scale
         let scaledHeight = extent.height * scale
         let dx = interior.minX + (interior.width - scaledWidth) / 2 - extent.minX * scale
@@ -466,9 +500,10 @@ nonisolated enum EditEngine {
         let scaledPhoto = image
             .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
             .transformed(by: CGAffineTransform(translationX: dx, y: dy))
+            .cropped(to: interior) // fill overflows one axis -- crop back to the interior so it never spills onto the border
 
-        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: extent)
-        return scaledPhoto.composited(over: white).cropped(to: extent)
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: window)
+        return scaledPhoto.composited(over: white).cropped(to: window)
     }
 
     /// System monospace stands in for a bundled Y2K-digicam-style font --

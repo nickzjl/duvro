@@ -149,6 +149,43 @@ struct DigicamOpsTests {
         #expect(bottomRun > topRun * 2, "expected the bottom border to be noticeably thicker than the top -- top run \(topRun)px, bottom run \(bottomRun)px")
     }
 
+    // MARK: - polaroidFrame: preview must match export (Phase 6 "preview
+    // matches export 1:1" acceptance -- this op is the one place that
+    // invariant could silently break, see applyPolaroidFrame's doc comment)
+
+    @Test func polaroidFramePreviewIsAlreadyCroppedTo4x5WithEqualSideBorders() throws {
+        // Landscape source (native aspect 4:3, deliberately far from 4:5)
+        // so a preview that's still un-cropped, or a fill-crop that
+        // doesn't coincide with applyPolaroidFrame's own `window`, would
+        // show up as extra white margin -- exactly the on-device bug this
+        // test guards against regressing.
+        let photo = try Self.makeTestPhoto(width: 400, height: 300, color: .blue)
+        let variant = EditVariant(name: "polaroid", ops: [.polaroidFrame(borderWidth: 0.07, bottomBorderMultiplier: 3.2)])
+        let rendered = EditEngine.render(photo: photo, variant: variant)
+        let cgImage = try #require(rendered.cgImage)
+        let width = cgImage.width, height = cgImage.height
+
+        let ratio = Double(width) / Double(height)
+        #expect(abs(ratio - 0.8) < 0.02, "render() must already be 4:5 for polaroidFrame -- got \(width)x\(height) (ratio \(ratio)); an un-cropped preview is what let the outside-window margin show through as a wrong, oversized border")
+
+        let midX = width / 2
+        let midY = height / 2
+        var topRun = 0
+        while topRun < height / 2, try Self.pixel(in: cgImage, x: midX, y: topRun).isNearWhite { topRun += 1 }
+        var bottomRun = 0
+        while bottomRun < height / 2, try Self.pixel(in: cgImage, x: midX, y: height - 1 - bottomRun).isNearWhite { bottomRun += 1 }
+        var leftRun = 0
+        while leftRun < width / 2, try Self.pixel(in: cgImage, x: leftRun, y: midY).isNearWhite { leftRun += 1 }
+        var rightRun = 0
+        while rightRun < width / 2, try Self.pixel(in: cgImage, x: width - 1 - rightRun, y: midY).isNearWhite { rightRun += 1 }
+
+        // Top/left/right all come from the SAME `side` constant -- they
+        // must read as equal, not just "all thinner than bottom."
+        #expect(abs(topRun - leftRun) <= 2, "top (\(topRun)) and left (\(leftRun)) borders both derive from the same `side` value and should match")
+        #expect(abs(leftRun - rightRun) <= 2, "left (\(leftRun)) and right (\(rightRun)) borders should match")
+        #expect(bottomRun > topRun * 2, "bottom (\(bottomRun)) should be noticeably thicker than top (\(topRun))")
+    }
+
     @Test func polaroidFrameWithOutOfBoundsParamsFailsSafeToUnedited() throws {
         let photo = try Self.makeTestPhoto(width: 100, height: 100, color: .blue)
         let identity = EditVariant(name: "identity", ops: [])
