@@ -21,6 +21,10 @@ struct VibeSelectionView: View {
     /// site and the DEBUG launch path answer this differently. See
     /// PackPreviewSheet.swift's file header for the fuller reasoning.
     var samplePhotos: (VibePack) -> [Photo]
+    /// The pack card's own small thumbnail (SampleAssets.packThumbnail) --
+    /// separate from `samplePhotos` since it's a dedicated, purpose-picked
+    /// image per pack, not just "whichever preview photo comes first."
+    var packThumbnail: (VibePack) -> UIImage?
     /// Called once "use this vibe" is tapped inside a pack's preview
     /// sheet, with the resolved photo count (already validated/defaulted
     /// -- see resolvedCount()). Curation progress/showcase (prd.md §4
@@ -220,18 +224,19 @@ struct VibeSelectionView: View {
         .buttonStyle(.plain)
     }
 
-    /// The card's own small thumbnail -- deliberately the sample photo's
-    /// plain, UNEDITED thumbnail, not a pack-rendered image. Ambiguous,
-    /// made-alone simplification: rendering a pack-graded thumbnail for
-    /// every card on this screen would mean 3 extra EditEngine.render
+    /// The card's own small thumbnail -- a dedicated SampleAssets image
+    /// (SampleAssets.packThumbnail), plain and UNEDITED, not a
+    /// pack-rendered image. Ambiguous, made-alone simplification carried
+    /// over from the original build: rendering a pack-graded thumbnail
+    /// for every card on this screen would mean 3 extra EditEngine.render
     /// calls before the screen can even show cards, for a thumbnail small
     /// enough that the graded look barely reads at that size anyway -- the
     /// full graded look is one tap away in PackPreviewSheet, which is what
-    /// that screen is for. Flagged in the session report.
+    /// that screen is for.
     private func cardThumbnail(_ pack: VibePack) -> some View {
         Group {
-            if let first = samplePhotos(pack).first {
-                Image(uiImage: first.thumbnail)
+            if let thumbnail = packThumbnail(pack) {
+                Image(uiImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {

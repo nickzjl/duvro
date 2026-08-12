@@ -46,18 +46,7 @@ struct RootFlowView: View {
             )
         } else {
             WelcomeView(
-                samplePhotos: {
-                    #if DEBUG
-                    return DebugWelcomePhotos.samplePhotos()
-                    #else
-                    // The ~3 real bundled sample photos this needs don't
-                    // exist yet (BUILD_ROADMAP's Deferred work register)
-                    // -- WelcomeView fails safe on an empty array (empty
-                    // placeholder print frames, no crash), same as
-                    // PackPreviewSheet's own placeholder handling.
-                    return []
-                    #endif
-                }(),
+                samplePhotos: SampleAssets.welcomePhotos(),
                 onStartNewChapter: {
                     demoMode = false
                     showImport = true
@@ -265,7 +254,7 @@ struct DebugLaunchRootView: View {
             .sheet(isPresented: .constant(true)) {
                 PackPreviewSheet(
                     pack: pack,
-                    samplePhotos: DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos),
+                    samplePhotos: SampleAssets.packPreviewPhotos(for: pack.id),
                     onUseThisVibe: {}
                 )
                 .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
@@ -303,7 +292,8 @@ struct DebugLaunchRootView: View {
             } else {
                 VibeSelectionView(
                     sessionStore: sessionStore,
-                    samplePhotos: { pack in DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos) },
+                    samplePhotos: { pack in SampleAssets.packPreviewPhotos(for: pack.id) },
+                    packThumbnail: { pack in SampleAssets.packThumbnail(for: pack.id) },
                     onVibeSelected: { pack, count in
                         // PHASE 9/10 CURATION INSERTION POINT: prd.md §4
                         // steps 5-6 ("curation progress" / "curation
@@ -331,7 +321,7 @@ struct DebugLaunchRootView: View {
     /// interactive navigation (which needs a tap simctl can't send).
     private func welcomeDestination() -> some View {
         WelcomeView(
-            samplePhotos: DebugWelcomePhotos.samplePhotos(),
+            samplePhotos: SampleAssets.welcomePhotos(),
             onStartNewChapter: {},
             onSeeHowItWorks: {}
         )

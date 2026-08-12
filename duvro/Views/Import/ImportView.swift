@@ -251,7 +251,7 @@ struct ImportView: View {
             debugFlowDestination { pack in
                 PackPreviewSheet(
                     pack: pack,
-                    samplePhotos: DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos),
+                    samplePhotos: SampleAssets.packPreviewPhotos(for: pack.id),
                     onUseThisVibe: {}
                 )
                 .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
@@ -322,21 +322,8 @@ struct ImportView: View {
         } else {
             VibeSelectionView(
                 sessionStore: sessionStore,
-                samplePhotos: { pack in
-                    #if DEBUG
-                    return DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos)
-                    #else
-                    // The ~18 real bundled sample photos this needs don't
-                    // exist yet (BUILD_ROADMAP's Deferred work register) --
-                    // PackPreviewSheet fails safe on an empty array (empty
-                    // placeholder tiles, no crash), which is the honest
-                    // state to show rather than substituting the user's own
-                    // imported photos (prd.md P0.11 requires bundled
-                    // own/licensed images specifically, for copyright
-                    // reasons -- not a stand-in for whatever they picked).
-                    return []
-                    #endif
-                },
+                samplePhotos: { pack in SampleAssets.packPreviewPhotos(for: pack.id) },
+                packThumbnail: { pack in SampleAssets.packThumbnail(for: pack.id) },
                 onVibeSelected: handleVibeSelected
             )
         }
@@ -433,7 +420,8 @@ struct ImportView: View {
         } else {
             VibeSelectionView(
                 sessionStore: sessionStore,
-                samplePhotos: { pack in DebugPackPreviewPhotos.samplePhotos(for: pack.id, from: sessionStore.photos) },
+                samplePhotos: { pack in SampleAssets.packPreviewPhotos(for: pack.id) },
+                packThumbnail: { pack in SampleAssets.packThumbnail(for: pack.id) },
                 onVibeSelected: { pack, count in
                     // Same real pipeline as loadFixtureIntoSessionStore's
                     // own calls, just against the user's resolved count
