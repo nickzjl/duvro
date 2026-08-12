@@ -133,7 +133,7 @@ private struct ScoreCard: View {
             Group {
                 Text("aes \(String(format: "%.2f", score.rawAestheticScore))")
                 Text("face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))  hum \(score.humanCount)")
-                Text("grp \(String(format: "%.1f", score.groupBonus))")
+                Text("grp \(String(format: "%.1f", score.groupBonus))  clip \(String(format: "%.2f", score.clipPenalty))")
                 Text("txt \(String(format: "%.2f", score.textCoverage))  blk \(score.textBlockCount)")
             }
             .font(.system(size: 9, design: .monospaced))
@@ -180,6 +180,7 @@ private struct ScoreDetailView: View {
                         row("best face quality", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : String(format: "%.4f", score.bestFaceQuality))
                         row("human count (body detection)", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : "\(score.humanCount)")
                         row("group bonus", String(format: "%.2f", score.groupBonus))
+                        row("clip penalty", "\(String(format: "%.3f", score.clipPenalty)) (\(score.faceBoxes.count) face box(es), \(score.humanBoxes.count) human box(es) tested)")
                         row("feature print", score.isHardRejected ? "nil (Stage 2 skipped -- rejected)" : (score.featurePrint != nil ? "present" : "nil"))
                         row("text coverage", "\(String(format: "%.4f", score.textCoverage)) (measurement only, not consumed)")
                         row("text block count", "\(score.textBlockCount)")

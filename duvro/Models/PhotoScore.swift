@@ -39,6 +39,19 @@ struct PhotoScore: Identifiable, Sendable {
     /// subjects with no detectable face. Only affects categorization (see
     /// `category`); face count/quality/group bonus are unaffected.
     let humanCount: Int
+    /// Normalized (0...1, Vision's own coordinate convention) bounding
+    /// boxes from DetectFaceRectanglesRequest/DetectHumanRectanglesRequest
+    /// -- kept (not just counted) so `clipPenalty` below can test them
+    /// against the eventual 4:5 crop window. [] for a rejected photo.
+    let faceBoxes: [CGRect]
+    let humanBoxes: [CGRect]
+    /// Source photo's width/height, read once via ImageIO (metadata only,
+    /// no decode) in ScoringService -- needed to know which axis the 4:5
+    /// crop actually trims, and by how much, since Vision's boxes are
+    /// normalized to the photo's OWN aspect ratio, not to 4:5. nil only if
+    /// the dimensions couldn't be read; `clipPenalty` treats that the same
+    /// as "nothing clipped" rather than guessing.
+    let sourceAspectRatio: Float?
     /// Top N classification labels above the confidence threshold, confidence-sorted descending.
     /// Computed in Stage 1, so present even for a rejected photo.
     let classificationLabels: [ClassificationLabel]
@@ -75,6 +88,11 @@ struct PhotoScore: Identifiable, Sendable {
     // MARK: - Derived
 
     let groupBonus: Float
+    /// How much the composite was docked for people clipped by the
+    /// eventual 4:5 crop -- see CompositeScoring.clipPenalty. 0 when
+    /// sourceAspectRatio is nil (dimensions unreadable) or nothing is
+    /// clipped, same as every other photo.
+    let clipPenalty: Float
     let compositeScore: Float
 
     init(
@@ -84,6 +102,9 @@ struct PhotoScore: Identifiable, Sendable {
         faceCount: Int,
         bestFaceQuality: Float,
         humanCount: Int = 0,
+        faceBoxes: [CGRect] = [],
+        humanBoxes: [CGRect] = [],
+        sourceAspectRatio: Float? = nil,
         classificationLabels: [ClassificationLabel],
         category: PhotoCategory,
         featurePrint: FeaturePrintObservation?,
@@ -97,6 +118,9 @@ struct PhotoScore: Identifiable, Sendable {
         self.faceCount = faceCount
         self.bestFaceQuality = bestFaceQuality
         self.humanCount = humanCount
+        self.faceBoxes = faceBoxes
+        self.humanBoxes = humanBoxes
+        self.sourceAspectRatio = sourceAspectRatio
         self.classificationLabels = classificationLabels
         self.category = category
         self.featurePrint = featurePrint
@@ -104,10 +128,17 @@ struct PhotoScore: Identifiable, Sendable {
         self.textBlockCount = textBlockCount
         self.rejectionReason = rejectionReason
         self.groupBonus = faceCount >= 2 ? 1.0 : 0.0
+        if let sourceAspectRatio {
+            let cropWindow = CompositeScoring.normalizedCropWindow(sourceAspect: sourceAspectRatio)
+            self.clipPenalty = CompositeScoring.clipPenalty(faceBoxes: faceBoxes, humanBoxes: humanBoxes, cropWindow: cropWindow)
+        } else {
+            self.clipPenalty = 0
+        }
         self.compositeScore = CompositeScoring.compute(
             aesthetic: CompositeScoring.normalizeAesthetic(rawAestheticScore),
             faceQuality: bestFaceQuality,
             groupBonus: faceCount >= 2 ? 1.0 : 0.0,
+            clipPenalty: self.clipPenalty,
             rejectionReason: rejectionReason
         )
     }

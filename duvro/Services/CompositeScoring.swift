@@ -53,6 +53,7 @@
 //     sparing a merely-misclassified ordinary photo.
 //
 
+import CoreGraphics
 import Foundation
 
 /// Pure and stateless -- explicitly nonisolated so it can be called from
@@ -66,6 +67,79 @@ nonisolated enum CompositeScoring {
     static let aestheticWeight: Float = 0.4 * renormalizationFactor
     static let faceQualityWeight: Float = 0.2 * renormalizationFactor
     static let groupBonusWeight: Float = 0.1 * renormalizationFactor
+
+    // MARK: - Crop-clip penalty
+    //
+    // A 4:5 center crop on a landscape group shot can cut people out of the
+    // frame -- and group shots are exactly the category CLAUDE.md's product
+    // thesis says matter most. PENALIZE, not reject: a group shot that
+    // clips one person at the edge may still be the best photo in the roll,
+    // and hard rejection would keep it off the shortlist entirely even when
+    // nothing better exists. This is SUBTRACTED from the weighted sum
+    // below, not blended in as a fourth weighted term -- the three
+    // existing weights (aesthetic/faceQuality/groupBonus) are untouched
+    // and still sum to 1.0; this is an independent penalty on top, capped
+    // by maxClipPenalty so it can reduce but never single-handedly zero
+    // out an otherwise-good photo.
+
+    /// Weight per clipped FACE (summed across every face in the photo,
+    /// each scaled by how much of ITS box is clipped -- see clipPenalty).
+    /// Heavy: a clipped face means that person is effectively gone from
+    /// the photo, which is the actual harm this penalty exists to catch.
+    /// Deliberately kept BELOW maxClipPenalty -- if one fully-clipped face
+    /// alone already saturated the cap, a second clipped person couldn't
+    /// add anything further, which would contradict "proportional to how
+    /// many people are clipped."
+    static let faceClipPenaltyWeight: Float = 0.35
+    /// Weight per clipped BODY (DetectHumanRectanglesRequest box). Light:
+    /// plenty of good photos crop at the waist or knees on purpose: only
+    /// a body that's clipped a lot should move the needle at all.
+    static let bodyClipPenaltyWeight: Float = 0.08
+    /// Upper bound on the summed penalty, regardless of how many people
+    /// are clipped or how badly. Keeps this a PENALTY, not a de facto
+    /// reject, for a busy group shot with several partially-clipped edges
+    /// -- reached at roughly 1.5 fully-clipped faces' worth.
+    static let maxClipPenalty: Float = 0.5
+
+    /// The 4:5 crop window in NORMALIZED (0...1 on both axes -- Vision's
+    /// own bounding-box coordinate convention) image space, for a source
+    /// of the given aspect ratio (width / height). Same centered-crop
+    /// formula as EditEngine.centerCropRect, re-derived here (not
+    /// imported) so this file stays dependency-free, per its own file
+    /// header -- CoreGraphics only, no CoreImage/Vision/UIKit.
+    static func normalizedCropWindow(sourceAspect: Float, targetAspect: Float = 4.0 / 5.0) -> CGRect {
+        guard sourceAspect > 0, targetAspect > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+        if sourceAspect > targetAspect {
+            // Wider than 4:5 -- crop the sides, keep full height.
+            let keptWidthFraction = CGFloat(targetAspect / sourceAspect)
+            let margin = (1 - keptWidthFraction) / 2
+            return CGRect(x: margin, y: 0, width: keptWidthFraction, height: 1)
+        } else {
+            // Taller than 4:5 -- crop top/bottom, keep full width.
+            let keptHeightFraction = CGFloat(sourceAspect / targetAspect)
+            let margin = (1 - keptHeightFraction) / 2
+            return CGRect(x: 0, y: margin, width: 1, height: keptHeightFraction)
+        }
+    }
+
+    /// Proportional to how many people are clipped and how badly: each
+    /// box contributes its OWN clipped-area fraction (0 = fully inside
+    /// the crop window, 1 = entirely outside it), summed across all boxes
+    /// of that kind and scaled by that kind's weight -- so two clipped
+    /// faces penalize roughly twice as much as one, not the same as one.
+    static func clipPenalty(faceBoxes: [CGRect], humanBoxes: [CGRect], cropWindow: CGRect) -> Float {
+        func clippedFraction(_ box: CGRect) -> Float {
+            let area = box.width * box.height
+            guard area > 0 else { return 0 }
+            let intersection = box.intersection(cropWindow)
+            let visibleArea = intersection.isNull ? 0 : intersection.width * intersection.height
+            return Float(max(0, (area - visibleArea) / area))
+        }
+        let faceSum = faceBoxes.reduce(Float(0)) { $0 + clippedFraction($1) }
+        let humanSum = humanBoxes.reduce(Float(0)) { $0 + clippedFraction($1) }
+        let raw = faceClipPenaltyWeight * faceSum + bodyClipPenaltyWeight * humanSum
+        return min(raw, maxClipPenalty)
+    }
 
     /// Normalized (0...1) aesthetic ceiling below which an isUtility flag is
     /// trusted enough to hard-reject. Starting point pending tuning: the
@@ -133,10 +207,14 @@ nonisolated enum CompositeScoring {
         return nil
     }
 
+    /// `clipPenalty` defaults to 0 so every pre-existing call site (and
+    /// every source that has no face/human boxes to test, e.g.
+    /// DebugFixture's hand-fabricated scores) is unaffected.
     static func compute(
         aesthetic: Float,
         faceQuality: Float,
         groupBonus: Float,
+        clipPenalty: Float = 0,
         rejectionReason: RejectionReason?
     ) -> Float {
         guard rejectionReason == nil else { return 0 }
@@ -144,6 +222,7 @@ nonisolated enum CompositeScoring {
         let score = aestheticWeight * normalizedAesthetic
             + faceQualityWeight * faceQuality.clamped(to: 0...1)
             + groupBonusWeight * groupBonus.clamped(to: 0...1)
+            - clipPenalty.clamped(to: 0...1)
         return score.clamped(to: 0...1)
     }
 }

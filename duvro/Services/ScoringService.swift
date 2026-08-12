@@ -54,6 +54,7 @@
 //
 
 import Foundation
+import ImageIO
 import Vision
 
 @Observable
@@ -150,6 +151,9 @@ final class ScoringService {
                 faceCount: raw.faceObservations.count,
                 bestFaceQuality: bestQuality,
                 humanCount: raw.humanCount,
+                faceBoxes: raw.faceObservations.map { $0.boundingBox.cgRect },
+                humanBoxes: raw.humanBoxes,
+                sourceAspectRatio: raw.sourceAspectRatio,
                 classificationLabels: raw.classificationLabels,
                 category: category,
                 featurePrint: raw.featurePrint,
@@ -181,6 +185,15 @@ final class ScoringService {
         let isUtility: Bool
         let faceObservations: [FaceObservation]
         let humanCount: Int
+        /// DetectHumanRectanglesRequest's own boxes, kept (not just
+        /// counted, unlike humanCount above) so the clip-penalty check has
+        /// something to test against the eventual 4:5 crop.
+        let humanBoxes: [CGRect]
+        /// Source photo's width/height (from photo.downsampledURL, read via
+        /// ImageIO metadata only -- no decode). nil if unreadable; the
+        /// clip-penalty check then treats it the same as "nothing clipped"
+        /// rather than guessing an aspect ratio.
+        let sourceAspectRatio: Float?
         let classificationLabels: [ClassificationLabel]
         let featurePrint: FeaturePrintObservation?
         let textCoverage: Float
@@ -196,6 +209,7 @@ final class ScoringService {
     nonisolated private static func scorePhoto(_ photo: Photo) async -> ScoreOutcome {
         do {
             let handler = ImageRequestHandler(photo.downsampledURL)
+            let sourceAspectRatio = imageAspectRatio(at: photo.downsampledURL)
 
             // MARK: Stage 1 -- aesthetics + classification + text recognition.
             let textRequest: RecognizeTextRequest = {
@@ -242,6 +256,8 @@ final class ScoringService {
                     isUtility: aesthetics.isUtility,
                     faceObservations: [],
                     humanCount: 0,
+                    humanBoxes: [],
+                    sourceAspectRatio: sourceAspectRatio,
                     classificationLabels: labels,
                     featurePrint: nil,
                     textCoverage: textCoverage,
@@ -273,6 +289,8 @@ final class ScoringService {
                 isUtility: aesthetics.isUtility,
                 faceObservations: faces,
                 humanCount: humans.count,
+                humanBoxes: humans.map { $0.boundingBox.cgRect },
+                sourceAspectRatio: sourceAspectRatio,
                 classificationLabels: labels,
                 featurePrint: featurePrint,
                 textCoverage: textCoverage,
@@ -287,6 +305,24 @@ final class ScoringService {
         } catch {
             return .failure(photoID: photo.id, error: error)
         }
+    }
+
+    /// Width / height of the source photo, read via ImageIO metadata only
+    /// (CGImageSourceCopyPropertiesAtIndex -- no decode) for
+    /// CompositeScoring's clip-penalty check, which needs to know which
+    /// axis the eventual 4:5 crop trims. Same metadata-only technique
+    /// already used elsewhere in the app (ExportService's diagnostic,
+    /// PhotoImportService.captureDate) -- cheap, no new decode cost added
+    /// to the scoring pass.
+    nonisolated private static func imageAspectRatio(at url: URL) -> Float? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat,
+              height > 0 else {
+            return nil
+        }
+        return Float(width / height)
     }
 
     /// Coverage = fraction of the frame covered by text bounding boxes,
