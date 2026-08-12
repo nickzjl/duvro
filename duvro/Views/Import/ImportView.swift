@@ -57,6 +57,10 @@ struct ImportView: View {
     @State private var showVibeSelect = false
     @State private var realFlowPack: VibePack?
     @State private var showFinalReviewReal = false
+    /// Phase 9: Final Review -> Caption -> Handoff. `realFlowCaption` is
+    /// the user's final (possibly hand-edited) text, passed to Handoff.
+    @State private var showCaptionReal = false
+    @State private var realFlowCaption = ""
     @State private var showHandoffReal = false
     /// Set when "use this vibe" is tapped before any photo has been
     /// scored -- ScoringService itself is #if DEBUG-only today (a larger,
@@ -80,13 +84,17 @@ struct ImportView: View {
     /// are additions, not replacements.
     @State private var showEditFlowDebug = false
     @State private var showFinalReviewDebug = false
-    /// Phase 6 -> Phase 7. Phase 9's caption screen belongs BETWEEN Final
-    /// Review and Handoff -- this phase explicitly skips straight past it
-    /// (SCOPE, per instruction); this flag is where that screen will
-    /// insert itself once it exists.
+    /// Phase 6 -> Phase 9 -> Phase 7.
+    @State private var showCaptionDebug = false
+    @State private var handoffDebugCaption = ""
     @State private var showHandoffDebug = false
     @State private var loadedPack: VibePack?
     @State private var packLoadError: VibePackLoadError?
+    /// "caption": jumps straight to CaptionView (golden_hour, same
+    /// convention as "edit"/"review"/"preview") for testing that screen
+    /// in isolation, previously only reachable via `-duvroDebugScreen
+    /// caption`.
+    @State private var showCaptionDebugStandalone = false
     /// "vibe select"/"preview": the same gap the edit/review buttons above
     /// closed for EditFlowView/FinalReviewView a few sessions ago --
     /// VibeSelectionView and PackPreviewSheet were previously reachable
@@ -101,6 +109,8 @@ struct ImportView: View {
     @State private var showVibeSelectDebug = false
     @State private var vibeSelectDebugResult: (pack: VibePack, count: Int)?
     @State private var showVibeSelectDebugFinalReview = false
+    @State private var showVibeSelectDebugCaption = false
+    @State private var vibeSelectDebugCaption = ""
     @State private var showVibeSelectDebugHandoff = false
     @State private var showPackPreviewDebug = false
     #endif
@@ -205,20 +215,33 @@ struct ImportView: View {
         .fullScreenCover(isPresented: $showFinalReviewDebug) {
             debugFlowDestination {
                 FinalReviewView(sessionStore: sessionStore, pack: $0) {
-                    // PHASE 9 INSERTION POINT: once the caption screen
-                    // exists, it goes here instead of jumping straight to
-                    // Handoff -- Final Review -> Caption -> Handoff, per
-                    // prd.md §4's canonical step order (9 then 10). For
-                    // this phase, "add a caption" skips straight to
-                    // Handoff (SCOPE, per instruction).
+                    // Final Review -> Caption -> Handoff, per prd.md §4's
+                    // canonical step order (9 then 10).
                     showFinalReviewDebug = false
+                    showCaptionDebug = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showCaptionDebug) {
+            debugFlowDestination { pack in
+                CaptionView(sessionStore: sessionStore, pack: pack) {
+                    showCaptionDebug = false
+                    showFinalReviewDebug = true
+                } onContinue: { text in
+                    handoffDebugCaption = text
+                    showCaptionDebug = false
                     showHandoffDebug = true
                 }
             }
         }
         .fullScreenCover(isPresented: $showHandoffDebug) {
             debugFlowDestination {
-                HandoffView(sessionStore: sessionStore, pack: $0)
+                HandoffView(sessionStore: sessionStore, pack: $0, caption: handoffDebugCaption)
+            }
+        }
+        .fullScreenCover(isPresented: $showCaptionDebugStandalone) {
+            debugFlowDestination { pack in
+                CaptionView(sessionStore: sessionStore, pack: pack, onBack: { showCaptionDebugStandalone = false }, onContinue: { _ in })
             }
         }
         .fullScreenCover(isPresented: $showVibeSelectDebug) {
@@ -275,13 +298,21 @@ struct ImportView: View {
     private func realFlowDestination() -> some View {
         if let realFlowPack {
             if showHandoffReal {
-                HandoffView(sessionStore: sessionStore, pack: realFlowPack)
+                HandoffView(sessionStore: sessionStore, pack: realFlowPack, caption: realFlowCaption)
+            } else if showCaptionReal {
+                CaptionView(sessionStore: sessionStore, pack: realFlowPack) {
+                    showCaptionReal = false
+                } onContinue: { text in
+                    realFlowCaption = text
+                    showCaptionReal = false
+                    showHandoffReal = true
+                }
             } else if showFinalReviewReal {
                 FinalReviewView(sessionStore: sessionStore, pack: realFlowPack) {
-                    // PHASE 9 INSERTION POINT: same as the DEBUG chain below --
-                    // Final Review -> Caption -> Handoff once Caption exists.
+                    // Final Review -> Caption -> Handoff, per prd.md §4's
+                    // canonical step order (9 then 10).
                     showFinalReviewReal = false
-                    showHandoffReal = true
+                    showCaptionReal = true
                 }
             } else {
                 EditFlowView(sessionStore: sessionStore, pack: realFlowPack) {
@@ -381,10 +412,18 @@ struct ImportView: View {
     private func vibeSelectDebugDestination() -> some View {
         if let vibeSelectDebugResult {
             if showVibeSelectDebugHandoff {
-                HandoffView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack)
+                HandoffView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack, caption: vibeSelectDebugCaption)
+            } else if showVibeSelectDebugCaption {
+                CaptionView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
+                    showVibeSelectDebugCaption = false
+                } onContinue: { text in
+                    vibeSelectDebugCaption = text
+                    showVibeSelectDebugCaption = false
+                    showVibeSelectDebugHandoff = true
+                }
             } else if showVibeSelectDebugFinalReview {
                 FinalReviewView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
-                    showVibeSelectDebugHandoff = true
+                    showVibeSelectDebugCaption = true
                 }
             } else {
                 EditFlowView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
@@ -681,6 +720,16 @@ struct ImportView: View {
                     Button("preview") {
                         guard loadFixtureIntoSessionStore() != nil else { return }
                         loadPackAndShow { showPackPreviewDebug = true }
+                    }
+
+                    // Jumps straight to CaptionView (golden_hour) --
+                    // previously only reachable via `-duvroDebugScreen
+                    // caption`. For testing the caption suggestion +
+                    // regenerate in isolation, without going through
+                    // edit/final review first.
+                    Button("caption") {
+                        guard loadFixtureIntoSessionStore() != nil else { return }
+                        loadPackAndShow { showCaptionDebugStandalone = true }
                     }
                 }
             }

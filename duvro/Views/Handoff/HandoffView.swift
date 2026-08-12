@@ -20,19 +20,18 @@ import SwiftUI
 struct HandoffView: View {
     var sessionStore: SessionStore
     let pack: VibePack
+    /// The user's final (possibly hand-edited) caption from CaptionView --
+    /// this is what actually gets copied to the clipboard on arrival at
+    /// `.done` now, replacing the old hardcoded placeholder string. Every
+    /// call site upstream of Handoff now runs through CaptionView first
+    /// (Phase 9), so this is always real, user-approved text, not a
+    /// generated draft nobody has seen.
+    let caption: String
 
     @Environment(\.dismiss) private var dismiss
     @State private var exportService = ExportService()
     @State private var renderCache: [UUID: UIImage] = [:]
     @State private var showToast = false
-
-    /// Phase 9 placeholder (this phase explicitly does not build the
-    /// caption screen -- SCOPE, per instruction). Phase 9 replaces this
-    /// with a real generated suggestion; until then this is what gets
-    /// copied to the clipboard so the rest of the handoff flow (b in
-    /// prd.md §4 step 10: "copy caption to clipboard") has something real
-    /// to do.
-    private static let placeholderCaption = "just posted."
 
     private var items: [ExportService.Item] {
         sessionStore.post.compactMap { score -> ExportService.Item? in
@@ -88,7 +87,7 @@ struct HandoffView: View {
             guard newPhase == .done else { return }
             // (b) in prd.md §4 step 10 -- copied only once export has
             // actually succeeded, not speculatively on arrival.
-            UIPasteboard.general.string = Self.placeholderCaption
+            UIPasteboard.general.string = caption
             withAnimation { showToast = true }
             Task {
                 try? await Task.sleep(for: .seconds(3))

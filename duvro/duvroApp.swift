@@ -105,6 +105,10 @@ enum DebugLaunchScreen: String {
     /// convention) -- this is purely for screenshotting the screen
     /// itself.
     case welcome
+    /// Phase 9: lands directly on CaptionView (golden_hour, same
+    /// convention as editFlow/finalReview) -- simctl can't tap through
+    /// Final Review's "add a caption" to reach it the real way.
+    case caption
 }
 
 enum DebugLaunch {
@@ -136,15 +140,17 @@ struct DebugLaunchRootView: View {
     /// editFlow starts in Phase 5; reaching the end of the post navigates
     /// forward into Phase 6, one-way, same as the real flow would.
     @State private var showFinalReview = false
-    /// Phase 6 -> Phase 7, one-way, same reasoning. Phase 9's caption
-    /// screen belongs BETWEEN Final Review and Handoff -- this phase
-    /// explicitly skips straight past it (SCOPE, per instruction); this
-    /// flag is where that screen will insert itself once it exists.
+    /// Phase 6 -> Phase 9. Shared by .editFlow, .finalReview, and
+    /// vibeSelectDestination() below, same as showFinalReview/showHandoff
+    /// already are -- one caption step for the whole chain, not three.
+    @State private var showCaption = false
+    @State private var handoffCaption = ""
+    /// Phase 9 -> Phase 7.
     @State private var showHandoff = false
     /// Set once vibeSelect's "use this vibe" hands off -- nil means "still
     /// showing VibeSelectionView itself," non-nil means "advance into the
-    /// edit flow with this pack," reusing showFinalReview/showHandoff
-    /// above for the rest of the chain.
+    /// edit flow with this pack," reusing showFinalReview/showCaption/
+    /// showHandoff above for the rest of the chain.
     @State private var vibeSelectResult: (pack: VibePack, count: Int)?
 
     var body: some View {
@@ -158,19 +164,26 @@ struct DebugLaunchRootView: View {
                     switch screen {
                     case .packPreview:
                         packPreviewDestination(pack: pack)
+                    case .caption:
+                        CaptionView(sessionStore: sessionStore, pack: pack, onBack: {}, onContinue: { _ in })
                     case .vibeSelect, .welcome:
                         EmptyView() // unreachable -- both handled above, before this branch is ever entered
                     case .editFlow:
                         if showHandoff {
-                            HandoffView(sessionStore: sessionStore, pack: pack)
+                            HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
+                        } else if showCaption {
+                            CaptionView(sessionStore: sessionStore, pack: pack) {
+                                showCaption = false
+                            } onContinue: { text in
+                                handoffCaption = text
+                                showCaption = false
+                                showHandoff = true
+                            }
                         } else if showFinalReview {
                             FinalReviewView(sessionStore: sessionStore, pack: pack) {
-                                // PHASE 9 INSERTION POINT: once the caption
-                                // screen exists, it goes here instead of
-                                // jumping straight to Handoff -- Final Review
-                                // -> Caption -> Handoff, per prd.md §4's
-                                // canonical step order (9 then 10).
-                                showHandoff = true
+                                // Final Review -> Caption -> Handoff, per
+                                // prd.md §4's canonical step order (9 then 10).
+                                showCaption = true
                             }
                         } else {
                             EditFlowView(sessionStore: sessionStore, pack: pack) {
@@ -190,11 +203,19 @@ struct DebugLaunchRootView: View {
                         }
                     case .finalReview:
                         if showHandoff {
-                            HandoffView(sessionStore: sessionStore, pack: pack)
+                            HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
+                        } else if showCaption {
+                            CaptionView(sessionStore: sessionStore, pack: pack) {
+                                showCaption = false
+                            } onContinue: { text in
+                                handoffCaption = text
+                                showCaption = false
+                                showHandoff = true
+                            }
                         } else {
                             FinalReviewView(sessionStore: sessionStore, pack: pack) {
-                                // Same Phase 9 insertion point as above.
-                                showHandoff = true
+                                // Same insertion point as .editFlow above.
+                                showCaption = true
                             }
                         }
                     }
@@ -226,7 +247,7 @@ struct DebugLaunchRootView: View {
     /// still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
-        case .editFlow, .finalReview: return "golden_hour"
+        case .editFlow, .finalReview, .caption: return "golden_hour"
         case .packPreview: return DebugLaunch.packName
         case .vibeSelect, .welcome: return "golden_hour"
         }
@@ -253,17 +274,26 @@ struct DebugLaunchRootView: View {
 
     /// Phase 8, Task 4. `vibeSelectResult == nil`: still showing
     /// VibeSelectionView itself. Once set (its "use this vibe" fired),
-    /// chains forward into editFlow -> finalReview -> handoff -- the SAME
-    /// one-way pattern every other entry point in this file uses,
-    /// reusing showFinalReview/showHandoff rather than duplicating them.
+    /// chains forward into editFlow -> finalReview -> caption -> handoff
+    /// -- the SAME one-way pattern every other entry point in this file
+    /// uses, reusing showFinalReview/showCaption/showHandoff rather than
+    /// duplicating them.
     private func vibeSelectDestination() -> some View {
         Group {
             if let vibeSelectResult {
                 if showHandoff {
-                    HandoffView(sessionStore: sessionStore, pack: vibeSelectResult.pack)
+                    HandoffView(sessionStore: sessionStore, pack: vibeSelectResult.pack, caption: handoffCaption)
+                } else if showCaption {
+                    CaptionView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
+                        showCaption = false
+                    } onContinue: { text in
+                        handoffCaption = text
+                        showCaption = false
+                        showHandoff = true
+                    }
                 } else if showFinalReview {
                     FinalReviewView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
-                        showHandoff = true
+                        showCaption = true
                     }
                 } else {
                     EditFlowView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
