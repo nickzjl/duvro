@@ -95,11 +95,57 @@ final class PhotoImportService {
                 .appendingPathExtension("jpg")
             try downsample(imageAt: original, maxPixelSize: 1280, to: downsampledURL)
             let thumbnail = try thumbnailImage(from: downsampledURL, maxPixelSize: 200)
-            return Photo(id: UUID(), originalURL: original, downsampledURL: downsampledURL, thumbnail: thumbnail)
+            // Read from the ORIGINAL, not downsampledURL -- downsample()'s
+            // thumbnail generator is not guaranteed to carry EXIF forward
+            // (thumbnail APIs commonly keep only orientation), and this
+            // must happen here, at import, or not at all: PHPicker hands
+            // back a copy with no persistent link back to the source asset
+            // library entry, so a photo imported without a capture date
+            // can't have one backfilled onto it later.
+            let captureDate = captureDate(from: original)
+            return Photo(id: UUID(), originalURL: original, downsampledURL: downsampledURL, thumbnail: thumbnail, captureDate: captureDate)
         } catch {
             return nil
         }
     }
+
+    /// EXIF DateTimeOriginal (when the shutter actually fired), falling
+    /// back to TIFF DateTime (some sources -- screenshots, edited/re-saved
+    /// images, some non-Apple cameras -- carry only this one) for a source
+    /// with no EXIF block at all. nil, not `Date()`, when neither tag is
+    /// present -- EditEngine's date stamp treats nil as "fall back to
+    /// today," and conflating "no data" with "captured now" here would
+    /// make that fallback silently indistinguishable from a real
+    /// timestamp. internal, not private: DebugFixture.swift also imports
+    /// from real files on disk and wants the same real dates, not a second
+    /// EXIF-reading implementation.
+    nonisolated static func captureDate(from sourceURL: URL) -> Date? {
+        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return nil
+        }
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        guard let raw = (exif?[kCGImagePropertyExifDateTimeOriginal] as? String)
+            ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String) else {
+            return nil
+        }
+        return exifDateFormatter.date(from: raw)
+    }
+
+    /// EXIF/TIFF date strings look like "2024:08:12 14:30:00" -- colons in
+    /// the date portion, no timezone. Parsed as a fixed wall-clock
+    /// reading, not converted through any timezone: this app only ever
+    /// turns it back into MM/dd/yy for the date-stamp overlay (EditEngine
+    /// .currentDateStampText), so what matters is reproducing the day the
+    /// photo was taken, not an absolute instant.
+    nonisolated private static let exifDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy':'MM':'dd HH':'mm':'ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
 
     nonisolated private static func copyOriginal(from provider: NSItemProvider) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in

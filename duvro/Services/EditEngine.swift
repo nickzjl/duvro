@@ -71,7 +71,7 @@ nonisolated enum EditEngine {
 
         var image = sourceCIImage
         for op in variant.ops {
-            image = apply(op, to: image) ?? image // a failed op is a no-op, not a chain abort
+            image = apply(op, to: image, captureDate: photo.captureDate) ?? image // a failed op is a no-op, not a chain abort
         }
 
         // Rasterize at the CHAIN'S OWN final extent, not the source's --
@@ -250,7 +250,7 @@ nonisolated enum EditEngine {
 
         var image = sourceCIImage
         for op in variant.ops {
-            image = apply(op, to: image) ?? image // same per-op fail-safe as the preview path
+            image = apply(op, to: image, captureDate: photo.captureDate) ?? image // same per-op fail-safe as the preview path
         }
 
         let cropRect = centerCropRect(for: sourceCIImage.extent, aspectRatio: 4.0 / 5.0)
@@ -278,7 +278,7 @@ nonisolated enum EditEngine {
 
     // MARK: - Op -> CIFilter
 
-    private static func apply(_ op: EditOp, to image: CIImage) -> CIImage? {
+    private static func apply(_ op: EditOp, to image: CIImage, captureDate: Date? = nil) -> CIImage? {
         switch op {
         case .toneCurve(let points):
             return applyToneCurve(points: points, to: image)
@@ -318,7 +318,7 @@ nonisolated enum EditEngine {
         case .polaroidFrame(let borderWidth, let bottomBorderMultiplier):
             return applyPolaroidFrame(borderWidth: borderWidth, bottomBorderMultiplier: bottomBorderMultiplier, to: image)
         case .dateStamp(let corner, let scale):
-            return applyDateStamp(corner: corner, scale: scale, to: image)
+            return applyDateStamp(corner: corner, scale: scale, captureDate: captureDate, to: image)
         }
     }
 
@@ -515,14 +515,11 @@ nonisolated enum EditEngine {
         UIFont.monospacedSystemFont(ofSize: pointSize, weight: .semibold)
     }
 
-    /// No EXIF capture timestamp exists in the pipeline yet -- Task 1 gap,
-    /// flagged in the Phase 8 session report. PhotoImportService never
-    /// reads kCGImagePropertyExifDateTimeOriginal (or a PHAsset
-    /// creationDate) and Photo has no timestamp field, so there is no real
-    /// capture date to stamp. Today's date stands in as a placeholder,
-    /// isolated behind this one function specifically so wiring in a real
-    /// capture timestamp later is a one-line swap here, not a change to
-    /// applyDateStamp or to EditOp's shape.
+    /// `referenceDate` is the photo's real EXIF capture date
+    /// (PhotoImportService.captureDate, read at import) when one exists.
+    /// Falls back to today only for a photo that genuinely has no usable
+    /// EXIF DateTimeOriginal/TIFF DateTime -- see PhotoImportService's doc
+    /// comment on captureDate(from:) for how often that actually happens.
     private static func currentDateStampText(referenceDate: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM'/'dd'/'yy"
@@ -533,13 +530,25 @@ nonisolated enum EditEngine {
     /// CIFilter draws text -- rasterizes via UIGraphicsImageRenderer (a
     /// small transparent-background bitmap, converted to CIImage), then
     /// composites it over the base image at the requested corner.
-    private static func applyDateStamp(corner: String, scale: Double, to image: CIImage) -> CIImage? {
+    ///
+    /// Positioned and sized against `window` (`centerCropRect(extent, 4/5)`)
+    /// -- the eventual 4:5 output rect -- not the full native `extent`, and
+    /// the returned image is cropped to `window` too, same fix and same
+    /// reasoning as applyPolaroidFrame's doc comment: positioning against
+    /// the pre-crop extent put the stamp near `extent`'s edge, which for a
+    /// non-4:5 source sits OUTSIDE the region that survives the downstream
+    /// 4:5 crop -- the reported "renders as '08/', rest runs off the edge"
+    /// bug. Cropping here too keeps the preview (render(), which never
+    /// crops on its own) and the export (renderFullResJPEGData, which
+    /// crops explicitly) pixel-identical.
+    private static func applyDateStamp(corner: String, scale: Double, captureDate: Date?, to image: CIImage) -> CIImage? {
         let extent = image.extent
         guard !extent.isEmpty, !extent.isInfinite, extent.width > 0, extent.height > 0 else { return image }
         guard scale > 0, scale < 0.2 else { return image } // sanity bound -- not a crash-avoidance need, just an absurd-value guard
 
-        let text = currentDateStampText()
-        let fontSize = extent.height * CGFloat(scale)
+        let window = centerCropRect(for: extent, aspectRatio: 4.0 / 5.0)
+        let text = currentDateStampText(referenceDate: captureDate ?? Date())
+        let fontSize = window.height * CGFloat(scale)
         guard fontSize > 0 else { return image }
         let font = dateStampFont(pointSize: fontSize)
         // Y2K digicam yellow -- warm and slightly desaturated, closer to a
@@ -551,7 +560,19 @@ nonisolated enum EditEngine {
 
         let padding = fontSize * 0.3
         let canvasSize = CGSize(width: textSize.width + padding * 2, height: textSize.height + padding * 2)
-        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        // scale = 1 is load-bearing, not cosmetic: UIGraphicsImageRenderer
+        // defaults to the DEVICE's scale (2x/3x on Retina), which would
+        // make stampCGImage's actual pixel dimensions a multiple of
+        // canvasSize. CIImage(cgImage:) has no concept of "points" -- its
+        // extent is the CGImage's raw pixel size -- so the positioning
+        // math below (which treats canvasSize.width as the stamp's
+        // rendered width) would then be wrong by that same multiple,
+        // pushing the stamp's right edge well past `window.maxX - margin`
+        // and off the visible frame. This was part of the reported
+        // clipping bug alongside the extent-vs-window mismatch above.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
         let stampUIImage = renderer.image { _ in
             // Faint black backing offset by 1pt so the yellow glyph still
             // reads against bright backgrounds (a bare yellow stamp
@@ -567,15 +588,15 @@ nonisolated enum EditEngine {
         let x: CGFloat
         switch corner {
         case "bottomLeading":
-            x = extent.minX + margin
+            x = window.minX + margin
         case "bottomTrailing":
-            x = extent.maxX - margin - canvasSize.width
+            x = window.maxX - margin - canvasSize.width
         default:
             return image // unknown corner -- no-op, not a crash
         }
-        let y = extent.minY + margin
+        let y = window.minY + margin
 
         let positioned = stampCIImage.transformed(by: CGAffineTransform(translationX: x, y: y))
-        return positioned.composited(over: image).cropped(to: extent)
+        return positioned.composited(over: image).cropped(to: window)
     }
 }

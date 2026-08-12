@@ -129,6 +129,8 @@ enum DebugFixture {
         }
 
         print("[debug-fixture] loaded \(photos.count)/\(entries.count) debug photos")
+        let withCaptureDate = photos.filter { $0.captureDate != nil }.count
+        print("[debug-fixture] \(withCaptureDate)/\(photos.count) carried a usable EXIF/TIFF capture date")
         guard !photos.isEmpty else { return nil }
         return FixtureBundle(photos: photos, scores: scores)
     }
@@ -146,7 +148,13 @@ enum DebugFixture {
         do {
             try PhotoImportService.downsample(imageAt: sourceURL, maxPixelSize: 1280, to: downsampledURL)
             let thumbnail = try PhotoImportService.thumbnailImage(from: downsampledURL, maxPixelSize: 200)
-            return Photo(id: id, originalURL: sourceURL, downsampledURL: downsampledURL, thumbnail: thumbnail)
+            // Real EXIF read from the real bundled file, same call
+            // PhotoImportService.makePhoto uses for a live import -- these
+            // are genuine personal photos (see the file header), so this
+            // doubles as a real, checkable read on how often EXIF capture
+            // dates are actually present, not a fabricated stand-in.
+            let captureDate = PhotoImportService.captureDate(from: sourceURL)
+            return Photo(id: id, originalURL: sourceURL, downsampledURL: downsampledURL, thumbnail: thumbnail, captureDate: captureDate)
         } catch {
             print("[debug-fixture] failed to process \(sourceURL.lastPathComponent): \(error)")
             return nil

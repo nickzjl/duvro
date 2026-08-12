@@ -85,4 +85,66 @@ struct PhotoImportServiceTests {
         #expect(Int(image.size.width.rounded()) == 100)
         #expect(Int(image.size.height.rounded()) == 50)
     }
+
+    // MARK: - captureDate(from:) -- Task 4b, EXIF DateTimeOriginal at import
+
+    @Test func captureDateReadsExifDateTimeOriginal() throws {
+        let url = try Self.makeJPEG(withExifDateTimeOriginal: "2019:04:15 09:30:00")
+        let date = PhotoImportService.captureDate(from: url)
+        let components = try #require(date).utcComponents
+        #expect(components.year == 2019 && components.month == 4 && components.day == 15)
+    }
+
+    @Test func captureDateReturnsNilForASourceWithNoExifDateAtAll() throws {
+        // Plain synthetic JPEG, no EXIF block written -- must fail safe to
+        // nil, not crash or silently invent a date (EditEngine's date
+        // stamp treats nil as "fall back to today"; a wrong non-nil value
+        // here would look like a real but incorrect capture date instead).
+        let sourceImage = UIGraphicsImageRenderer(size: CGSize(width: 50, height: 50)).image { _ in
+            UIColor.green.setFill()
+            UIRectFill(CGRect(x: 0, y: 0, width: 50, height: 50))
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("duvro-exif-test-noexif-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        try sourceImage.jpegData(compressionQuality: 0.95)?.write(to: url)
+        #expect(PhotoImportService.captureDate(from: url) == nil)
+    }
+
+    // MARK: - Fixtures
+
+    private static func makeJPEG(withExifDateTimeOriginal raw: String) throws -> URL {
+        let size = CGSize(width: 50, height: 50)
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            UIColor.purple.setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+        }
+        guard let cgImage = image.cgImage else {
+            struct NoCGImage: Error {}
+            throw NoCGImage()
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("duvro-exif-test-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil) else {
+            struct NoDestination: Error {}
+            throw NoDestination()
+        }
+        let exifDict: [CFString: Any] = [kCGImagePropertyExifDateTimeOriginal: raw]
+        let properties: [CFString: Any] = [kCGImagePropertyExifDictionary: exifDict]
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            struct FinalizeFailed: Error {}
+            throw FinalizeFailed()
+        }
+        return url
+    }
+}
+
+private extension Date {
+    var utcComponents: DateComponents {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.dateComponents([.year, .month, .day], from: self)
+    }
 }

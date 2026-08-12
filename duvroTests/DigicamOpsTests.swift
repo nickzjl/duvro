@@ -233,6 +233,49 @@ struct DigicamOpsTests {
         #expect(!foundYellowOpposite, "the date stamp should only appear near its target corner, not the opposite one")
     }
 
+    @Test func dateStampNeverTouchesTheFrameEdgeOnALandscapeSourceOrALongString() throws {
+        // Two compounding bugs, reproduced together: (1) a LANDSCAPE
+        // source (native aspect far from 4:5, so `window` sits well
+        // inside `extent` -- positioning against the wrong one is exactly
+        // what put the old stamp outside the visible frame), and (2) a
+        // longer string via a bigger scale (the un-set UIGraphicsImageRenderer
+        // scale bug multiplied the stamp's real pixel width past what the
+        // margin math assumed, worse for wider text).
+        let photo = try Self.makeTestPhoto(width: 400, height: 300, color: UIColor(red: 0.05, green: 0.05, blue: 0.2, alpha: 1))
+        let variant = EditVariant(name: "stamped", ops: [.dateStamp(corner: "bottomTrailing", scale: 0.08)])
+        let data = try #require(EditEngine.renderFullResJPEGData(photo: photo, variant: variant))
+        let image = try #require(UIImage(data: data))
+        let cgImage = try #require(image.cgImage)
+        let width = cgImage.width, height = cgImage.height
+
+        func isYellowish(_ p: RGBA) -> Bool { p.r > 180 && p.g > 140 && p.b < 140 }
+
+        // The stamp sits in the bottom rows -- scan the LAST COLUMN (the
+        // true right edge of the cropped, exported frame) across that
+        // band. If any pixel there is yellow, the glyph is touching or
+        // past the edge, i.e. clipped.
+        var touchesRightEdge = false
+        for y in stride(from: max(0, height - 60), to: height, by: 2) {
+            if isYellowish(try Self.pixel(in: cgImage, x: width - 1, y: y)) {
+                touchesRightEdge = true
+            }
+        }
+        #expect(!touchesRightEdge, "date stamp must stay inset from the frame's right edge, not clipped against it")
+
+        // And it must actually have rendered somewhere near that corner --
+        // an inset-to-the-point-of-invisible stamp would trivially pass
+        // the check above too.
+        var foundYellowNearCorner = false
+        for dx in stride(from: 4, to: min(120, width), by: 4) {
+            for dy in stride(from: 0, to: min(60, height), by: 4) {
+                if isYellowish(try Self.pixel(in: cgImage, x: width - 1 - dx, y: height - 1 - dy)) {
+                    foundYellowNearCorner = true
+                }
+            }
+        }
+        #expect(foundYellowNearCorner, "expected the date stamp to actually render near the bottomTrailing corner, inset from the edge")
+    }
+
     @Test func dateStampWithUnknownCornerFailsSafeToUnedited() throws {
         let photo = try Self.makeTestPhoto(width: 100, height: 100, color: UIColor(red: 0.05, green: 0.05, blue: 0.2, alpha: 1))
         let identity = EditVariant(name: "identity", ops: [])
