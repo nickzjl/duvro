@@ -24,29 +24,41 @@
 //  scheduleAdjustmentRender below) since it already owns photoStage/
 //  renderCache -- AdvancedAdjustmentsSheet itself is a "dumb" controls
 //  view bound to liveAdjustments, not something that renders a photo of
-//  its own.
+//  its own. The render pipeline is a DRAIN LOOP (startAdjustmentRenderLoop),
+//  not cancel-and-restart -- a cancel-on-every-tick design with an
+//  upfront delay starves out every render during a fast drag (each tick
+//  cancels the previous task before its delay elapses, so nothing ever
+//  completes until ticks stop), which is exactly the bug an on-device
+//  hand-test caught: the photo only updated on slider release. The drain
+//  loop never cancels an in-flight render for a newer value -- it just
+//  records it and picks it up on the loop's next pass -- so intermediate
+//  values actually land while dragging.
 //
-//  "Photo scales up into the remaining space" (UI_NOTES §5): implemented
-//  as an explicit layout swap tied to showAdvancedSheet (photoBlock
-//  below) -- headline/pills/utility row/CTA all step aside so the photo
-//  is the only other element on screen, animated. MEASURED (pixel-exact,
-//  not eyeballed) on-device finding, though: the photo does NOT actually
-//  get any BIGGER when this happens, because it's already at its
-//  structural maximum size before the sheet ever opens --
-//  `.frame(maxWidth: .infinity).aspectRatio(4/5, contentMode: .fit)` is
-//  WIDTH-bound (full device width minus the 20pt page padding), and that
-//  width is identical whether the sheet is open or not, so the
-//  aspect-locked height is identical too (confirmed: photo width and
-//  height both pixel-identical between the two states, screenshots
-//  diffed with PIL). There is no unused width for it to grow into on a
-//  portrait phone screen -- "scale up" is only observable if a screen's
-//  base layout shows the photo at LESS than full width, which this one
-//  never did (full-width was already correct per UI_NOTES §1's own 4:5-
-//  everywhere rule). What this DOES deliver, and what was verified: the
-//  photo is never cropped or covered by the sheet, stays exactly as
-//  large as it ever gets to be, fully visible, undimmed, for the sheet's
-//  entire lifetime -- the requirement's actual intent, even though the
-//  literal word "scales" doesn't apply here.
+//  "Photo scales up into the remaining space" (UI_NOTES §5): photoBlock
+//  reserves REAL space for the sheet via a GeometryReader on this view's
+//  own full body (the same reference height .presentationDetents' own
+//  fraction uses, so the two can't drift apart), and pins photoStage +
+//  the variant pills to the TOP of what's left -- not centered. An
+//  earlier version centered the photo in the FULL screen height with no
+//  awareness of the sheet's own covered region at all, which on-device
+//  hand-testing showed sliding the photo DOWN into the sheet instead of
+//  up into freed space. Pills stay visible (you need to see which
+//  variant you're adjusting) and tappable (switching one mid-sheet
+//  re-renders the live preview -- see selectVariant); headline and
+//  utility row step aside since neither is a meaningful action mid-
+//  adjustment. MEASURED (pixel-exact, not eyeballed) finding that still
+//  holds: the photo does not get any BIGGER than its normal full-width
+//  size when the sheet opens, since `.frame(maxWidth: .infinity)
+//  .aspectRatio(4/5, contentMode: .fit)` is WIDTH-bound and width doesn't
+//  change -- there's no unused width on a portrait phone to grow into.
+//  What photoBlock's reserved-space padding actually guarantees is that
+//  the photo (at that same, unchanged size) sits entirely ABOVE the
+//  sheet at rest, never cropped by it -- and if a future device/content
+//  combination ever makes that natural size too tall for the space
+//  above the sheet, `.aspectRatio(..., contentMode: .fit)` shrinks it
+//  automatically (still centered, still 4:5) because it's finally being
+//  given a real height constraint to respect, not a hand-written
+//  fallback branch.
 //
 
 import SwiftUI
@@ -101,11 +113,17 @@ struct EditFlowView: View {
     /// renderCache's own (adjustments-inclusive, but not LIVE-ticking)
     /// render whenever this is nil.
     @State private var liveImage: UIImage?
-    /// Cancel-and-restart throttle: newest slider value wins, anything
-    /// still in flight for a stale value is discarded rather than shown.
-    /// See scheduleAdjustmentRender's doc comment for the coalescing
-    /// approach and measured budget.
+    /// Drain-loop throttle state -- see scheduleAdjustmentRender's doc
+    /// comment. `pendingAdjustments` is the latest value not yet rendered;
+    /// the loop (adjustmentRenderTask) clears it before rendering it, so a
+    /// non-nil value here always means "something newer is waiting."
+    @State private var pendingAdjustments: PhotoAdjustments?
     @State private var adjustmentRenderTask: Task<Void, Never>?
+    /// Minimum time between the START of two COMPLETED renders -- NOT a
+    /// pre-render delay. Keeps updates to a sane ceiling (~16/sec) without
+    /// ever blocking the first render of a new value the way the old
+    /// cancel-then-sleep design did.
+    private let minAdjustmentRenderInterval: Duration = .milliseconds(60)
 
     private let swipeThreshold: CGFloat = 60
 
@@ -122,43 +140,47 @@ struct EditFlowView: View {
         post.indices.contains(currentIndex + 1) ? post[currentIndex + 1] : nil
     }
 
+    /// `.presentationDetents([.fraction(...)])` sizes the sheet as this
+    /// fraction of the PRESENTING view's own full height -- a GeometryReader
+    /// wrapping this same view's full body (not just the space below
+    /// topBar) is what lets photoBlock's own reserved-space math use that
+    /// identical reference height, so the two can't drift out of sync the
+    /// way an independently-guessed padding constant could.
+    private let advancedSheetDetentFraction: CGFloat = 0.35
+
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            if let currentPhoto, let currentScore {
-                if showAdvancedSheet {
-                    // The sheet's own remaining-space layout (UI_NOTES §5:
-                    // "photo scales up into the remaining space... staying
-                    // centered") -- headline/pills/utility row/CTA all step
-                    // aside so the photo is the only other element on
-                    // screen, growing into whatever height that frees up.
-                    photoBlock(photo: currentPhoto, score: currentScore)
-                        .frame(maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            headlineBlock
-                            photoStage(photo: currentPhoto, score: currentScore)
-                            pillRow
-                            if !isScoped {
-                                utilityRow
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                topBar
+                if let currentPhoto, let currentScore {
+                    if showAdvancedSheet {
+                        photoBlock(photo: currentPhoto, score: currentScore, reservedForSheet: geo.size.height * advancedSheetDetentFraction)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 20) {
+                                headlineBlock
+                                photoStage(photo: currentPhoto, score: currentScore)
+                                pillRow
+                                if !isScoped {
+                                    utilityRow
+                                }
                             }
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 12)
+                        // .safeAreaInset (not a fixed padding guess) reserves exactly
+                        // the sticky CTA's real height + the device's safe area,
+                        // whatever that is on a given device -- UI_NOTES fix 5's
+                        // requirement, satisfied structurally rather than with a
+                        // hand-tuned magic number that could drift out of sync with
+                        // the button's actual size.
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            primaryButton
+                        }
                     }
-                    // .safeAreaInset (not a fixed padding guess) reserves exactly
-                    // the sticky CTA's real height + the device's safe area,
-                    // whatever that is on a given device -- UI_NOTES fix 5's
-                    // requirement, satisfied structurally rather than with a
-                    // hand-tuned magic number that could drift out of sync with
-                    // the button's actual size.
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        primaryButton
-                    }
+                } else {
+                    completeState
                 }
-            } else {
-                completeState
             }
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
@@ -174,7 +196,7 @@ struct EditFlowView: View {
         }
         .sheet(isPresented: $showAdvancedSheet) {
             AdvancedAdjustmentsSheet(adjustments: $liveAdjustments)
-                .presentationDetents([.fraction(0.35)])
+                .presentationDetents([.fraction(advancedSheetDetentFraction)])
                 .presentationBackgroundInteraction(.enabled) // Task 1 gate: this alone removes the default sheet dimming, see BUILD_ROADMAP Known gotchas #9
                 .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
                 .presentationDragIndicator(.visible)
@@ -232,17 +254,39 @@ struct EditFlowView: View {
 
     // MARK: - Photo stage: the single 4:5 photo + swipe-between-variants
 
-    /// Centers photoStage in whatever vertical space is left above the
-    /// advanced sheet's ~35% detent -- see this file's header for why this
-    /// (not .matchedGeometryEffect) is the "scales up into remaining
-    /// space" implementation.
-    private func photoBlock(photo: Photo, score: PhotoScore) -> some View {
-        VStack {
-            Spacer(minLength: 12)
+    /// Pins the photo + variant pills to the TOP of whatever space is left
+    /// above the sheet -- NOT centered. Headline and utility row step
+    /// aside entirely (both are non-actions mid-adjustment: skipping
+    /// doesn't make sense while editing, and "advanced" is what got you
+    /// here); pills stay because you need to see which variant you're
+    /// adjusting while you adjust it, and switching one mid-sheet re-
+    /// renders the live preview (see selectVariant).
+    ///
+    /// `.padding(.bottom, reservedForSheet)` is what keeps the whole
+    /// stack clear of the sheet's own covered region -- combined with the
+    /// trailing Spacer(minLength: 0), photoStage/pillRow render at their
+    /// natural (same-as-before) size and get pushed to the top whenever
+    /// that fits (verified on-device: it does, on the tested device size),
+    /// and `.aspectRatio(4/5, contentMode: .fit)` inside photoStage
+    /// shrinks automatically -- centered, still 4:5 -- if a device/content
+    /// combination ever makes the natural size NOT fit, since fit always
+    /// respects a real height constraint from its parent rather than only
+    /// ever sizing off width. No separate hand-written "does it fit"
+    /// branch needed -- this is what contentMode: .fit already does once
+    /// it's actually given a bounded height instead of the old
+    /// .frame(maxHeight: .infinity), which is what let the photo drift
+    /// down to vertical-center of the WHOLE screen (past the sheet's own
+    /// top edge) instead of stopping above it.
+    private func photoBlock(photo: Photo, score: PhotoScore, reservedForSheet: CGFloat) -> some View {
+        VStack(spacing: 16) {
             photoStage(photo: photo, score: score)
-                .padding(.horizontal, 20)
-            Spacer(minLength: 12)
+            pillRow
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, reservedForSheet)
     }
 
     private func photoStage(photo: Photo, score: PhotoScore) -> some View {
@@ -416,6 +460,13 @@ struct EditFlowView: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
             displayedVariantIndex = index
         }
+        // Pills stay visible and tappable while the sheet is open -- a
+        // switch here needs the SAME liveAdjustments re-rendered against
+        // the new variant, not just left showing the old variant's stale
+        // liveImage until the next slider tick happens to fire.
+        if showAdvancedSheet {
+            scheduleAdjustmentRender()
+        }
     }
 
     /// Re-seeds displayedVariantIndex (from any prior pick, else variant 0),
@@ -503,6 +554,7 @@ struct EditFlowView: View {
     private func closeAdvancedSheet() {
         adjustmentRenderTask?.cancel()
         adjustmentRenderTask = nil
+        pendingAdjustments = nil
         if let currentScore {
             sessionStore.setAdjustments(liveAdjustments, forPhotoID: currentScore.id)
             renderCache.removeValue(forKey: currentScore.id)
@@ -511,36 +563,54 @@ struct EditFlowView: View {
         liveImage = nil
     }
 
-    /// Cancel-and-restart throttle: every liveAdjustments change cancels
-    /// whatever render was in flight and starts a fresh one after a 50ms
-    /// debounce, so a fast drag across a slider coalesces down to roughly
-    /// the last value every ~50ms (a ~20 renders/sec ceiling) instead of
-    /// queuing one render per tick. 50ms was chosen as a safety margin
-    /// over the 8-17ms/variant baseline measured for Golden Hour on device
-    /// (BUILD_ROADMAP Phase 4) -- this adjustments pass adds a colorMatrix
-    /// + composite (intensity) and/or a colorControls pass
-    /// (brightness/contrast) on top of that baseline, so budgeting roughly
-    /// 3x the plain-variant cost per render leaves headroom without making
-    /// the slider feel laggy. Renders from photo.downsampledURL (via
-    /// EditEngine.render, never the full-res path) per CLAUDE.md's
-    /// performance rules. `Task.isCancelled` is checked both before AND
-    /// after the actual render call -- before, so a value superseded
-    /// during the debounce window never renders at all; after, so a
-    /// render that was already in flight when a newer value arrived
-    /// doesn't overwrite liveImage with stale output once it finishes.
+    /// Drain-loop throttle, NOT cancel-and-restart: recording a new value
+    /// never cancels a render that's already in flight -- it just updates
+    /// `pendingAdjustments`, which the loop below picks up on its NEXT
+    /// iteration. This is what lets intermediate renders actually land
+    /// during a continuous drag (the earlier cancel-on-every-tick design
+    /// meant no render could ever survive long enough to complete while
+    /// ticks kept arriving faster than its own pre-render delay -- it only
+    /// ever showed the LAST value, on release). If a loop is already
+    /// running (adjustmentRenderTask != nil), this is a no-op beyond
+    /// updating the pending value -- there's nothing to start.
     private func scheduleAdjustmentRender() {
-        guard let currentPhoto, let variant = pack.variants[safe: displayedVariantIndex] else { return }
-        adjustmentRenderTask?.cancel()
-        let photo = currentPhoto
-        let adjustments = liveAdjustments
+        pendingAdjustments = liveAdjustments
+        guard adjustmentRenderTask == nil else { return }
+        startAdjustmentRenderLoop()
+    }
+
+    /// Renders `pendingAdjustments` back-to-back for as long as new values
+    /// keep arriving, always for the LATEST value at the moment each
+    /// render starts (never a stale queued one), spaced by AT LEAST
+    /// minAdjustmentRenderInterval between completions -- so a fast drag
+    /// updates the photo several times a second (gated mostly by actual
+    /// render cost, ~8-17ms/variant baseline plus this pass's colorMatrix/
+    /// colorControls work) while a slow, deliberate drag still renders
+    /// every meaningful step. Re-reads currentPhoto/displayedVariantIndex
+    /// on EVERY iteration (not captured once) so a variant switch mid-drag
+    /// (pillRow tap while the sheet is open) is picked up on the loop's
+    /// next pass rather than needing the sheet reopened. Renders from
+    /// photo.downsampledURL (via EditEngine.render, never the full-res
+    /// path) per CLAUDE.md's performance rules. Exits (sets
+    /// adjustmentRenderTask = nil) once pendingAdjustments is drained;
+    /// closeAdvancedSheet cancels it directly for teardown.
+    private func startAdjustmentRenderLoop() {
         adjustmentRenderTask = Task {
-            try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled else { return }
-            let rendered = await Task.detached(priority: .userInitiated) {
-                EditEngine.render(photo: photo, variant: variant, adjustments: adjustments)
-            }.value
-            guard !Task.isCancelled else { return }
-            liveImage = rendered
+            while !Task.isCancelled, let adjustments = pendingAdjustments {
+                pendingAdjustments = nil
+                guard let photo = currentPhoto, let variant = pack.variants[safe: displayedVariantIndex] else { break }
+                let start = ContinuousClock.now
+                let rendered = await Task.detached(priority: .userInitiated) {
+                    EditEngine.render(photo: photo, variant: variant, adjustments: adjustments)
+                }.value
+                guard !Task.isCancelled else { break }
+                liveImage = rendered
+                let elapsed = ContinuousClock.now - start
+                if elapsed < minAdjustmentRenderInterval {
+                    try? await Task.sleep(for: minAdjustmentRenderInterval - elapsed)
+                }
+            }
+            adjustmentRenderTask = nil
         }
     }
 

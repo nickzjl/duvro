@@ -40,12 +40,12 @@ struct AdvancedAdjustmentsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("adjust this photo")
-                .font(.duvroHeadline)
+                .font(.duvroPackTitle) // 22pt Newsreader, not duvroHeadline's 26pt -- the compact ~35% detent doesn't have room for the larger token, and 22pt still clears the 20pt Newsreader floor (UI_NOTES §1)
                 .foregroundStyle(Color(hex: "171614"))
 
-            VStack(spacing: 22) {
+            VStack(spacing: 10) {
                 sliderRow(
                     title: "intensity",
                     valueLabel: "\(Int((adjustments.intensity * 100).rounded()))%",
@@ -66,8 +66,6 @@ struct AdvancedAdjustmentsSheet: View {
                 )
             }
 
-            Spacer(minLength: 0)
-
             Button {
                 dismiss()
             } label: {
@@ -75,19 +73,19 @@ struct AdvancedAdjustmentsSheet: View {
                     .font(.duvroButton)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 54)
+                    .frame(height: 44) // was 54 (CLAUDE.md's PRIMARY button height) -- this isn't the screen's primary CTA, it's a compact sheet's only control, and 54 was part of what didn't fit in the ~35% detent
                     .background(Color(hex: "171614"))
                     .clipShape(Capsule())
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
         .background(Color(hex: "FFFCF7").ignoresSafeArea())
     }
 
     private func sliderRow(title: String, valueLabel: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(title)
                     .font(.duvroLabel)
