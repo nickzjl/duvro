@@ -37,28 +37,47 @@
 //  "Photo scales up into the remaining space" (UI_NOTES §5): photoBlock
 //  reserves REAL space for the sheet via a GeometryReader on this view's
 //  own full body (the same reference height .presentationDetents' own
-//  fraction uses, so the two can't drift apart), and pins photoStage +
-//  the variant pills to the TOP of what's left -- not centered. An
-//  earlier version centered the photo in the FULL screen height with no
-//  awareness of the sheet's own covered region at all, which on-device
-//  hand-testing showed sliding the photo DOWN into the sheet instead of
-//  up into freed space. Pills stay visible (you need to see which
-//  variant you're adjusting) and tappable (switching one mid-sheet
-//  re-renders the live preview -- see selectVariant); headline and
-//  utility row step aside since neither is a meaningful action mid-
-//  adjustment. MEASURED (pixel-exact, not eyeballed) finding that still
-//  holds: the photo does not get any BIGGER than its normal full-width
-//  size when the sheet opens, since `.frame(maxWidth: .infinity)
-//  .aspectRatio(4/5, contentMode: .fit)` is WIDTH-bound and width doesn't
-//  change -- there's no unused width on a portrait phone to grow into.
-//  What photoBlock's reserved-space padding actually guarantees is that
-//  the photo (at that same, unchanged size) sits entirely ABOVE the
-//  sheet at rest, never cropped by it -- and if a future device/content
-//  combination ever makes that natural size too tall for the space
-//  above the sheet, `.aspectRatio(..., contentMode: .fit)` shrinks it
-//  automatically (still centered, still 4:5) because it's finally being
-//  given a real height constraint to respect, not a hand-written
-//  fallback branch.
+//  fraction uses, so the two can't drift apart), and pins photoStage to
+//  the TOP of what's left -- not centered. An earlier version centered
+//  the photo in the FULL screen height with no awareness of the sheet's
+//  own covered region at all, which on-device hand-testing showed
+//  sliding the photo DOWN into the sheet instead of up into freed space.
+//  Headline, variant pills, and utility row all step aside entirely
+//  while the sheet is open -- hand-testing found the pills aren't
+//  actually tappable while a background-interactive sheet is up, so an
+//  even earlier version that kept them visible was just spending space
+//  on dead-looking controls; hiding them gives that space to the photo,
+//  which now renders visibly larger. MEASURED (pixel-exact, not
+//  eyeballed) finding that still holds independent of that: the photo's
+//  natural size is capped by `.frame(maxWidth: .infinity)
+//  .aspectRatio(4/5, contentMode: .fit)`, which is WIDTH-bound -- there's
+//  no unused width on a portrait phone to grow into past that. What
+//  photoBlock's reserved-space padding guarantees is that the photo (at
+//  its natural size, now the largest it's been across all three rounds
+//  of this fix) sits entirely ABOVE the sheet at rest, never cropped by
+//  it -- and if a future device/content combination ever makes that
+//  natural size too tall for the space above the sheet,
+//  `.aspectRatio(..., contentMode: .fit)` shrinks it automatically
+//  (still centered, still 4:5) because it's finally being given a real
+//  height constraint to respect, not a hand-written fallback branch.
+//
+//  NO ANIMATION on the showAdvancedSheet-driven layout swap (photoBlock
+//  <-> the normal ScrollView layout): a hand-tested ~0.6s delay between
+//  tapping "done" and the pills/utility row/CTA reappearing was traced
+//  (timestamped, on-device) to NOT being blocked or waiting on any
+//  render -- the state change and the restored view both landed within
+//  ~7ms of the tap. The actual cause was a `.animation(_:value:
+//  showAdvancedSheet)` modifier that had been on this view's body: with
+//  no explicit `.transition()` on either branch, SwiftUI applies the
+//  default opacity transition to a value-driven if/else swap, so the
+//  restored content was genuinely fading in over that modifier's 0.3s
+//  duration, running concurrently with (not blocked by) iOS's own
+//  ~0.3-0.4s native sheet-dismiss transition -- two real animations
+//  overlapping read as slower than either alone. Removed entirely (not
+//  replaced with `.transition(.identity)`, which would need adding to
+//  both branches) -- the sheet's own native present/dismiss transition
+//  already carries the perceived motion in both directions, verified via
+//  screenshot after removal.
 //
 
 import SwiftUI
@@ -184,7 +203,6 @@ struct EditFlowView: View {
             }
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
-        .animation(.easeInOut(duration: 0.3), value: showAdvancedSheet)
         .onAppear {
             enterPhoto(resetVariant: true)
             if startWithAdvancedSheetOpen { openAdvancedSheet() }
