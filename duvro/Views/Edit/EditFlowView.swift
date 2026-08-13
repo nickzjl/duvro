@@ -254,33 +254,32 @@ struct EditFlowView: View {
 
     // MARK: - Photo stage: the single 4:5 photo + swipe-between-variants
 
-    /// Pins the photo + variant pills to the TOP of whatever space is left
-    /// above the sheet -- NOT centered. Headline and utility row step
-    /// aside entirely (both are non-actions mid-adjustment: skipping
-    /// doesn't make sense while editing, and "advanced" is what got you
-    /// here); pills stay because you need to see which variant you're
-    /// adjusting while you adjust it, and switching one mid-sheet re-
-    /// renders the live preview (see selectVariant).
+    /// Pins the photo to the TOP of whatever space is left above the sheet
+    /// -- NOT centered. Headline, variant pills, and utility row all step
+    /// aside entirely while the sheet is open: on-device hand-testing
+    /// found the pills aren't actually tappable while a background-
+    /// interactive sheet is up, so a prior version that kept them visible
+    /// was just spending space on dead-looking controls -- hiding them
+    /// gives that space back to the photo instead.
     ///
-    /// `.padding(.bottom, reservedForSheet)` is what keeps the whole
-    /// stack clear of the sheet's own covered region -- combined with the
-    /// trailing Spacer(minLength: 0), photoStage/pillRow render at their
-    /// natural (same-as-before) size and get pushed to the top whenever
-    /// that fits (verified on-device: it does, on the tested device size),
-    /// and `.aspectRatio(4/5, contentMode: .fit)` inside photoStage
-    /// shrinks automatically -- centered, still 4:5 -- if a device/content
-    /// combination ever makes the natural size NOT fit, since fit always
-    /// respects a real height constraint from its parent rather than only
-    /// ever sizing off width. No separate hand-written "does it fit"
-    /// branch needed -- this is what contentMode: .fit already does once
-    /// it's actually given a bounded height instead of the old
-    /// .frame(maxHeight: .infinity), which is what let the photo drift
-    /// down to vertical-center of the WHOLE screen (past the sheet's own
-    /// top edge) instead of stopping above it.
+    /// `.padding(.bottom, reservedForSheet)` is what keeps the photo clear
+    /// of the sheet's own covered region -- combined with the trailing
+    /// Spacer(minLength: 0), photoStage renders at its natural size and
+    /// gets pushed to the top whenever that fits (verified on-device: it
+    /// does, on the tested device size), and `.aspectRatio(4/5,
+    /// contentMode: .fit)` inside photoStage shrinks automatically --
+    /// centered, still 4:5 -- if a device/content combination ever makes
+    /// the natural size NOT fit, since fit always respects a real height
+    /// constraint from its parent rather than only ever sizing off width.
+    /// No separate hand-written "does it fit" branch needed -- this is
+    /// what contentMode: .fit already does once it's actually given a
+    /// bounded height instead of the old .frame(maxHeight: .infinity),
+    /// which is what let the photo drift down to vertical-center of the
+    /// WHOLE screen (past the sheet's own top edge) instead of stopping
+    /// above it.
     private func photoBlock(photo: Photo, score: PhotoScore, reservedForSheet: CGFloat) -> some View {
         VStack(spacing: 16) {
             photoStage(photo: photo, score: score)
-            pillRow
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -460,10 +459,11 @@ struct EditFlowView: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
             displayedVariantIndex = index
         }
-        // Pills stay visible and tappable while the sheet is open -- a
-        // switch here needs the SAME liveAdjustments re-rendered against
-        // the new variant, not just left showing the old variant's stale
-        // liveImage until the next slider tick happens to fire.
+        // photoStage's own swipe gesture can still reach this while the
+        // sheet is open (pillRow itself is hidden then -- see photoBlock)
+        // -- a switch here needs the SAME liveAdjustments re-rendered
+        // against the new variant, not left showing the old variant's
+        // stale liveImage until the next slider tick happens to fire.
         if showAdvancedSheet {
             scheduleAdjustmentRender()
         }
@@ -547,20 +547,70 @@ struct EditFlowView: View {
     /// this is wired off THAT, not off the button. Commits liveAdjustments
     /// to SessionStore (the single source of truth from here on: Final
     /// Review and full-res export both read sessionStore.adjustments(for:),
-    /// never this view's own liveAdjustments) and invalidates this photo's
-    /// renderCache entry so the next ensureRendered pass (called
-    /// immediately below, not left to whenever enterPhoto next runs)
-    /// re-renders all 3 variants with the new adjustments baked in.
+    /// never this view's own liveAdjustments).
+    ///
+    /// DIAGNOSED (hand-tested regression: dismiss took ~0.6s vs. an
+    /// instant open, pills/utility row/CTA all visibly delayed with it).
+    /// The previous version deleted the WHOLE renderCache entry here and
+    /// immediately kicked off a fresh, full 3-variant re-render at
+    /// .userInitiated priority in the same instant the sheet started
+    /// dismissing. That's real CIContext/Metal GPU work -- technically
+    /// off the main thread, so nothing was literally BLOCKED, but it was
+    /// competing for the GPU with the sheet's own dismiss transition
+    /// (also GPU-driven), which is what made the animation itself feel
+    /// slow. It was also pure waste for the CURRENTLY DISPLAYED variant:
+    /// `liveImage` already holds the correct final render for it (it's
+    /// what was on screen the instant before "done"/drag-dismiss fired)
+    /// -- there was never a reason to re-render that one from scratch.
+    ///
+    /// Fix: seed the cache with `liveImage` for the displayed variant
+    /// directly (free -- no render), so the layout restores with the
+    /// correct image ALREADY in place, nothing gating it. The other 2
+    /// variants genuinely are stale (still showing the OLD adjustments)
+    /// and do need a real re-render, but at .utility priority and with
+    /// no urgency -- refreshStaleVariants below -- since nothing on
+    /// screen depends on them until the user actually swipes to one.
     private func closeAdvancedSheet() {
         adjustmentRenderTask?.cancel()
         adjustmentRenderTask = nil
         pendingAdjustments = nil
         if let currentScore {
-            sessionStore.setAdjustments(liveAdjustments, forPhotoID: currentScore.id)
-            renderCache.removeValue(forKey: currentScore.id)
-            Task { await ensureRendered(photoID: currentScore.id) }
+            let photoID = currentScore.id
+            sessionStore.setAdjustments(liveAdjustments, forPhotoID: photoID)
+            if let finalImage = liveImage {
+                var variants = renderCache[photoID] ?? Array(repeating: finalImage, count: pack.variants.count)
+                if variants.indices.contains(displayedVariantIndex) {
+                    variants[displayedVariantIndex] = finalImage
+                }
+                renderCache[photoID] = variants
+            }
+            refreshStaleVariants(photoID: photoID, exceptIndex: displayedVariantIndex)
         }
         liveImage = nil
+    }
+
+    /// Re-renders every variant OTHER than `exceptIndex` for `photoID`
+    /// with its just-committed adjustments, at LOW (.utility) priority --
+    /// see closeAdvancedSheet's doc comment for why this is deliberately
+    /// deprioritized and scoped to skip the one variant that's already
+    /// correct. Overwrites only the indices that actually changed, so a
+    /// concurrent navigation away from this photo (which would prune or
+    /// replace its renderCache entry entirely) can't be clobbered by a
+    /// stale write landing after the fact.
+    private func refreshStaleVariants(photoID: UUID, exceptIndex: Int) {
+        guard let photo = sessionStore.photo(for: photoID) else { return }
+        let variantsList = pack.variants
+        let adjustments = sessionStore.adjustments(for: photoID)
+        Task {
+            let rendered = await Task.detached(priority: .utility) {
+                variantsList.map { EditEngine.render(photo: photo, variant: $0, adjustments: adjustments) }
+            }.value
+            guard var cached = renderCache[photoID], cached.count == rendered.count else { return }
+            for index in rendered.indices where index != exceptIndex {
+                cached[index] = rendered[index]
+            }
+            renderCache[photoID] = cached
+        }
     }
 
     /// Drain-loop throttle, NOT cancel-and-restart: recording a new value

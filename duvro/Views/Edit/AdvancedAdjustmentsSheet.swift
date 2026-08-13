@@ -79,7 +79,7 @@ struct AdvancedAdjustmentsSheet: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 8)
+        .padding(.top, 16) // was 8 -- sat tight against the drag indicator; +8 (one step on the 8pt grid) clears it
         .padding(.bottom, 12)
         .background(Color(hex: "FFFCF7").ignoresSafeArea())
     }
