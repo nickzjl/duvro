@@ -16,14 +16,37 @@
 //  pick intact and re-editable (displayedVariantIndex re-seeds from
 //  SessionStore.pickedVariantName, not reset to 0).
 //
-//  The "advanced" control (intensity/brightness/contrast/crop sheet) is
-//  explicitly OUT OF SCOPE this session -- UI_NOTES §5's no-dimming/no-blur
-//  requirement has an unverified open question
-//  (.presentationBackgroundInteraction(.enabled) actually removing
-//  SwiftUI's default sheet dimming) that needs verifying awake, not guessed
-//  at 5am. DECISION (flagged, not asked): omitted entirely rather than
-//  shown-but-inert -- a visibly dead control reads as broken; no control at
-//  all reads as "not built yet," which is the truth this session.
+//  ADVANCED SHEET (intensity/brightness/contrast -- UI_NOTES §5, prd.md
+//  P0.8): the dimming/blur question is resolved (BUILD_ROADMAP Known
+//  gotchas #9 -- .presentationBackgroundInteraction(.enabled) alone
+//  satisfies "no dimming, full clarity the whole time"). This file owns
+//  the whole live-rendering pipeline (liveAdjustments/liveImage/
+//  scheduleAdjustmentRender below) since it already owns photoStage/
+//  renderCache -- AdvancedAdjustmentsSheet itself is a "dumb" controls
+//  view bound to liveAdjustments, not something that renders a photo of
+//  its own.
+//
+//  "Photo scales up into the remaining space" (UI_NOTES §5): implemented
+//  as an explicit layout swap tied to showAdvancedSheet (photoBlock
+//  below) -- headline/pills/utility row/CTA all step aside so the photo
+//  is the only other element on screen, animated. MEASURED (pixel-exact,
+//  not eyeballed) on-device finding, though: the photo does NOT actually
+//  get any BIGGER when this happens, because it's already at its
+//  structural maximum size before the sheet ever opens --
+//  `.frame(maxWidth: .infinity).aspectRatio(4/5, contentMode: .fit)` is
+//  WIDTH-bound (full device width minus the 20pt page padding), and that
+//  width is identical whether the sheet is open or not, so the
+//  aspect-locked height is identical too (confirmed: photo width and
+//  height both pixel-identical between the two states, screenshots
+//  diffed with PIL). There is no unused width for it to grow into on a
+//  portrait phone screen -- "scale up" is only observable if a screen's
+//  base layout shows the photo at LESS than full width, which this one
+//  never did (full-width was already correct per UI_NOTES §1's own 4:5-
+//  everywhere rule). What this DOES deliver, and what was verified: the
+//  photo is never cropped or covered by the sheet, stays exactly as
+//  large as it ever gets to be, fully visible, undimmed, for the sheet's
+//  entire lifetime -- the requirement's actual intent, even though the
+//  literal word "scales" doesn't apply here.
 //
 
 import SwiftUI
@@ -57,6 +80,26 @@ struct EditFlowView: View {
     @State private var usedHeadlines: Set<String> = []
     @State private var currentHeadline = ""
 
+    // MARK: - Advanced adjustments sheet (UI_NOTES §5)
+
+    @State private var showAdvancedSheet = false
+    /// Two-way-bound into AdvancedAdjustmentsSheet's sliders. Seeded from
+    /// SessionStore.adjustments(for:) when the sheet opens; only written
+    /// back to SessionStore on close (closeAdvancedSheet), not on every
+    /// tick -- ticks only drive liveImage below.
+    @State private var liveAdjustments = PhotoAdjustments()
+    /// The live-rendered preview while the sheet is open, showing
+    /// liveAdjustments applied on top of the displayed variant. nil
+    /// outside the sheet's lifetime -- photoStage falls back to
+    /// renderCache's own (adjustments-inclusive, but not LIVE-ticking)
+    /// render whenever this is nil.
+    @State private var liveImage: UIImage?
+    /// Cancel-and-restart throttle: newest slider value wins, anything
+    /// still in flight for a stale value is discarded rather than shown.
+    /// See scheduleAdjustmentRender's doc comment for the coalescing
+    /// approach and measured budget.
+    @State private var adjustmentRenderTask: Task<Void, Never>?
+
     private let swipeThreshold: CGFloat = 60
 
     private var isScoped: Bool { scopedTo != nil }
@@ -76,34 +119,56 @@ struct EditFlowView: View {
         VStack(spacing: 0) {
             topBar
             if let currentPhoto, let currentScore {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        headlineBlock
-                        photoStage(photo: currentPhoto, score: currentScore)
-                        pillRow
-                        if !isScoped {
-                            utilityRow
+                if showAdvancedSheet {
+                    // The sheet's own remaining-space layout (UI_NOTES §5:
+                    // "photo scales up into the remaining space... staying
+                    // centered") -- headline/pills/utility row/CTA all step
+                    // aside so the photo is the only other element on
+                    // screen, growing into whatever height that frees up.
+                    photoBlock(photo: currentPhoto, score: currentScore)
+                        .frame(maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            headlineBlock
+                            photoStage(photo: currentPhoto, score: currentScore)
+                            pillRow
+                            if !isScoped {
+                                utilityRow
+                            }
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                }
-                // .safeAreaInset (not a fixed padding guess) reserves exactly
-                // the sticky CTA's real height + the device's safe area,
-                // whatever that is on a given device -- UI_NOTES fix 5's
-                // requirement, satisfied structurally rather than with a
-                // hand-tuned magic number that could drift out of sync with
-                // the button's actual size.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    primaryButton
+                    // .safeAreaInset (not a fixed padding guess) reserves exactly
+                    // the sticky CTA's real height + the device's safe area,
+                    // whatever that is on a given device -- UI_NOTES fix 5's
+                    // requirement, satisfied structurally rather than with a
+                    // hand-tuned magic number that could drift out of sync with
+                    // the button's actual size.
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        primaryButton
+                    }
                 }
             } else {
                 completeState
             }
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
+        .animation(.easeInOut(duration: 0.3), value: showAdvancedSheet)
         .onAppear { enterPhoto(resetVariant: true) }
         .onChange(of: currentIndex) { _, _ in enterPhoto(resetVariant: true) }
+        .onChange(of: liveAdjustments) { _, _ in scheduleAdjustmentRender() }
+        .onChange(of: showAdvancedSheet) { _, isShowing in
+            if !isShowing { closeAdvancedSheet() }
+        }
+        .sheet(isPresented: $showAdvancedSheet) {
+            AdvancedAdjustmentsSheet(adjustments: $liveAdjustments)
+                .presentationDetents([.fraction(0.35)])
+                .presentationBackgroundInteraction(.enabled) // Task 1 gate: this alone removes the default sheet dimming, see BUILD_ROADMAP Known gotchas #9
+                .presentationCornerRadius(28) // UI_NOTES §1: "sheets 28pt radius"
+                .presentationDragIndicator(.visible)
+        }
     }
 
     // MARK: - Top bar (back control + progress, UI_NOTES fix 2 + §6)
@@ -157,8 +222,27 @@ struct EditFlowView: View {
 
     // MARK: - Photo stage: the single 4:5 photo + swipe-between-variants
 
+    /// Centers photoStage in whatever vertical space is left above the
+    /// advanced sheet's ~35% detent -- see this file's header for why this
+    /// (not .matchedGeometryEffect) is the "scales up into remaining
+    /// space" implementation.
+    private func photoBlock(photo: Photo, score: PhotoScore) -> some View {
+        VStack {
+            Spacer(minLength: 12)
+            photoStage(photo: photo, score: score)
+                .padding(.horizontal, 20)
+            Spacer(minLength: 12)
+        }
+    }
+
     private func photoStage(photo: Photo, score: PhotoScore) -> some View {
-        let displayedImage = renderCache[photo.id]?[safe: displayedVariantIndex]
+        // liveImage (this sheet session's throttled live render) wins while
+        // the sheet is open; renderCache's own render -- itself already
+        // adjustments-inclusive per ensureRendered below, just not
+        // ticking live -- covers every other moment, including the instant
+        // right after the sheet closes and before the next ensureRendered
+        // pass replaces it.
+        let displayedImage = (showAdvancedSheet ? liveImage : nil) ?? renderCache[photo.id]?[safe: displayedVariantIndex]
         return ZStack {
             if let displayedImage {
                 Image(uiImage: displayedImage)
@@ -363,14 +447,85 @@ struct EditFlowView: View {
     /// Off the main actor (EditEngine is nonisolated/stateless) so a slow
     /// render never blocks scrolling/interaction, even though Golden Hour
     /// measured 8-17ms/variant on device (BUILD_ROADMAP Phase 4) -- this
-    /// pack's speed isn't assumed to hold for every future pack.
+    /// pack's speed isn't assumed to hold for every future pack. Renders
+    /// WITH this photo's committed adjustments baked in (same value for
+    /// all 3 variants -- adjustments are per-PHOTO, not per-variant) so
+    /// switching variants, or leaving and returning to this photo, shows
+    /// the adjusted look without needing the sheet open.
     private func ensureRendered(photoID: UUID) async {
         guard renderCache[photoID] == nil, let photo = sessionStore.photo(for: photoID) else { return }
         let variants = pack.variants
+        let adjustments = sessionStore.adjustments(for: photoID)
         let rendered = await Task.detached(priority: .userInitiated) {
-            variants.map { EditEngine.render(photo: photo, variant: $0) }
+            variants.map { EditEngine.render(photo: photo, variant: $0, adjustments: adjustments) }
         }.value
         renderCache[photoID] = rendered
+    }
+
+    // MARK: - Advanced adjustments sheet
+
+    /// Seeds the sheet's live state from whatever's already committed for
+    /// this photo, then kicks off the first live render so liveImage isn't
+    /// nil for the brief window before the first slider tick.
+    private func openAdvancedSheet() {
+        guard let currentScore else { return }
+        liveAdjustments = sessionStore.adjustments(for: currentScore.id)
+        liveImage = renderCache[currentScore.id]?[safe: displayedVariantIndex]
+        showAdvancedSheet = true
+        scheduleAdjustmentRender()
+    }
+
+    /// Fires on EITHER dismissal path -- "done" tapped or the sheet
+    /// dragged down -- since both just flip showAdvancedSheet to false and
+    /// this is wired off THAT, not off the button. Commits liveAdjustments
+    /// to SessionStore (the single source of truth from here on: Final
+    /// Review and full-res export both read sessionStore.adjustments(for:),
+    /// never this view's own liveAdjustments) and invalidates this photo's
+    /// renderCache entry so the next ensureRendered pass (called
+    /// immediately below, not left to whenever enterPhoto next runs)
+    /// re-renders all 3 variants with the new adjustments baked in.
+    private func closeAdvancedSheet() {
+        adjustmentRenderTask?.cancel()
+        adjustmentRenderTask = nil
+        if let currentScore {
+            sessionStore.setAdjustments(liveAdjustments, forPhotoID: currentScore.id)
+            renderCache.removeValue(forKey: currentScore.id)
+            Task { await ensureRendered(photoID: currentScore.id) }
+        }
+        liveImage = nil
+    }
+
+    /// Cancel-and-restart throttle: every liveAdjustments change cancels
+    /// whatever render was in flight and starts a fresh one after a 50ms
+    /// debounce, so a fast drag across a slider coalesces down to roughly
+    /// the last value every ~50ms (a ~20 renders/sec ceiling) instead of
+    /// queuing one render per tick. 50ms was chosen as a safety margin
+    /// over the 8-17ms/variant baseline measured for Golden Hour on device
+    /// (BUILD_ROADMAP Phase 4) -- this adjustments pass adds a colorMatrix
+    /// + composite (intensity) and/or a colorControls pass
+    /// (brightness/contrast) on top of that baseline, so budgeting roughly
+    /// 3x the plain-variant cost per render leaves headroom without making
+    /// the slider feel laggy. Renders from photo.downsampledURL (via
+    /// EditEngine.render, never the full-res path) per CLAUDE.md's
+    /// performance rules. `Task.isCancelled` is checked both before AND
+    /// after the actual render call -- before, so a value superseded
+    /// during the debounce window never renders at all; after, so a
+    /// render that was already in flight when a newer value arrived
+    /// doesn't overwrite liveImage with stale output once it finishes.
+    private func scheduleAdjustmentRender() {
+        guard let currentPhoto, let variant = pack.variants[safe: displayedVariantIndex] else { return }
+        adjustmentRenderTask?.cancel()
+        let photo = currentPhoto
+        let adjustments = liveAdjustments
+        adjustmentRenderTask = Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            let rendered = await Task.detached(priority: .userInitiated) {
+                EditEngine.render(photo: photo, variant: variant, adjustments: adjustments)
+            }.value
+            guard !Task.isCancelled else { return }
+            liveImage = rendered
+        }
     }
 
     // MARK: - Headlines

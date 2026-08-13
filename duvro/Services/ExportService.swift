@@ -36,6 +36,7 @@ final class ExportService {
     struct Item {
         let photo: Photo
         let variant: EditVariant
+        var adjustments: PhotoAdjustments = PhotoAdjustments()
     }
 
     enum RenderError: Error {
@@ -125,7 +126,7 @@ final class ExportService {
             // renderFullResJPEGData's doc comment in EditEngine.swift.
             let data: Data? = await Task.detached(priority: .userInitiated) {
                 autoreleasepool {
-                    EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant)
+                    EditEngine.renderFullResJPEGData(photo: item.photo, variant: item.variant, adjustments: item.adjustments)
                 }
             }.value
 

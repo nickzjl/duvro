@@ -46,6 +46,15 @@ final class SessionStore {
     /// Absent = not yet committed -- Phase 5 pre-selects variant 1 visually
     /// on arrival, but that's a display default, not a commit.
     private(set) var pickedVariantName: [UUID: String] = [:]
+    /// Per-photo advanced-sheet tweaks (intensity/brightness/contrast) on
+    /// top of the picked variant's own look. Same photo-ID-keyed-dictionary
+    /// pattern as pickedVariantName above, for the same reason: a plain map
+    /// lookup naturally survives variant switches, photo navigation, and
+    /// sheet dismiss/reopen without any view-lifecycle bookkeeping. Absent
+    /// = PhotoAdjustments() (the no-op default), same absent-means-default
+    /// convention as pickedVariantName being absent meaning "not yet
+    /// committed."
+    private(set) var adjustments: [UUID: PhotoAdjustments] = [:]
 
     // MARK: - Setters (Phase 1-3.5 outputs)
 
@@ -65,6 +74,7 @@ final class SessionStore {
         chosenSelection = result
         postOrder = result.selected.map(\.id)
         pickedVariantName = [:]
+        adjustments = [:]
     }
 
     func setRunnerUps(_ runnerUps: [PhotoScore]) {
@@ -99,6 +109,17 @@ final class SessionStore {
 
     func pickVariant(_ variantName: String, forPhotoID id: UUID) {
         pickedVariantName[id] = variantName
+    }
+
+    /// Absent -> PhotoAdjustments() (the no-op default), never nil-checked
+    /// at call sites -- mirrors score(for:)/photo(for:)'s own
+    /// dictionary-lookup-with-fallback shape.
+    func adjustments(for id: UUID) -> PhotoAdjustments {
+        adjustments[id] ?? PhotoAdjustments()
+    }
+
+    func setAdjustments(_ value: PhotoAdjustments, forPhotoID id: UUID) {
+        adjustments[id] = value
     }
 
     /// "skip this photo" (BUILD_ROADMAP Phase 5): removes `id` from the
@@ -145,6 +166,7 @@ final class SessionStore {
         guard let removalIndex = postOrder.firstIndex(of: id) else { return }
         postOrder.remove(at: removalIndex)
         pickedVariantName[id] = nil
+        adjustments[id] = nil
 
         let promoted = runnerUps.isEmpty ? nil : runnerUps.removeFirst()
         if let promoted {
@@ -166,6 +188,7 @@ final class SessionStore {
     func removeFromPost(_ id: UUID) {
         postOrder.removeAll { $0 == id }
         pickedVariantName[id] = nil
+        adjustments[id] = nil
     }
 
     /// Same semantics as RangeReplaceableCollection.move(fromOffsets:toOffset:)

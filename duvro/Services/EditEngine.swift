@@ -59,10 +59,13 @@ nonisolated enum EditEngine {
         return CIContext(options: nil)
     }
 
-    /// Renders `photo`'s downsampled preview through `variant`'s op chain.
-    /// Never throws. On any failure, falls back toward the original,
-    /// unedited image rather than returning nothing or a blank frame.
-    static func render(photo: Photo, variant: EditVariant) -> UIImage {
+    /// Renders `photo`'s downsampled preview through `variant`'s op chain,
+    /// then `adjustments` (Phase 8's advanced sheet -- intensity/
+    /// brightness/contrast, applied as a separate pass on top of the
+    /// variant's own look; see PhotoAdjustments' doc comment). Never
+    /// throws. On any failure, falls back toward the original, unedited
+    /// image rather than returning nothing or a blank frame.
+    static func render(photo: Photo, variant: EditVariant, adjustments: PhotoAdjustments = PhotoAdjustments()) -> UIImage {
         guard let sourceCIImage = CIImage(contentsOf: photo.downsampledURL) else {
             // Can't even decode the source from disk -- fall back to the
             // in-memory thumbnail rather than crash or return nothing.
@@ -72,6 +75,9 @@ nonisolated enum EditEngine {
         var image = sourceCIImage
         for op in variant.ops {
             image = apply(op, to: image, captureDate: photo.captureDate) ?? image // a failed op is a no-op, not a chain abort
+        }
+        if !adjustments.isDefault {
+            image = applyAdjustments(adjustments, to: image, original: sourceCIImage)
         }
 
         // Rasterize at the CHAIN'S OWN final extent, not the source's --
@@ -202,7 +208,7 @@ nonisolated enum EditEngine {
     /// EditEngine's own per-op fail-safe, or JPEG encoding fails) so
     /// ExportService can surface a clear per-photo failure instead of
     /// silently exporting a placeholder or crashing mid-export.
-    static func renderFullResJPEGData(photo: Photo, variant: EditVariant, compressionQuality: CGFloat = 0.9, maxPixelSize: CGFloat = maxExportPixelSize) -> Data? {
+    static func renderFullResJPEGData(photo: Photo, variant: EditVariant, adjustments: PhotoAdjustments = PhotoAdjustments(), compressionQuality: CGFloat = 0.9, maxPixelSize: CGFloat = maxExportPixelSize) -> Data? {
         // Fresh, disposed-per-render context -- see the doc comment
         // above for why this replaced sharedContext here specifically.
         let context = makeContext()
@@ -252,6 +258,9 @@ nonisolated enum EditEngine {
         for op in variant.ops {
             image = apply(op, to: image, captureDate: photo.captureDate) ?? image // same per-op fail-safe as the preview path
         }
+        if !adjustments.isDefault {
+            image = applyAdjustments(adjustments, to: image, original: sourceCIImage)
+        }
 
         let cropRect = centerCropRect(for: sourceCIImage.extent, aspectRatio: 4.0 / 5.0)
         let cropped = image.cropped(to: cropRect)
@@ -274,6 +283,64 @@ nonisolated enum EditEngine {
             colorSpace: colorSpace,
             options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: compressionQuality]
         )
+    }
+
+    // MARK: - Adjustments (Phase 8 advanced sheet)
+
+    /// Applies PhotoAdjustments on top of `image` (the variant's own op
+    /// chain output). `original` is the SAME source CIImage the op chain
+    /// started from (unedited, pre-op-chain) -- used only for the intensity
+    /// blend below. Order: intensity blends the variant's look back toward
+    /// the original FIRST, then brightness/contrast apply on top of
+    /// whatever that blend produced -- so brightness/contrast always act on
+    /// what's actually on screen, while intensity only ever controls how
+    /// much of the PACK's own styling shows through.
+    private static func applyAdjustments(_ adjustments: PhotoAdjustments, to image: CIImage, original: CIImage) -> CIImage {
+        var result = image
+        if adjustments.intensity < 1.0 {
+            let amount = max(0, min(1, adjustments.intensity))
+            // `original` is cropped to the STYLED image's own extent, not
+            // used at its full native extent -- most ops preserve extent so
+            // this is a no-op crop, but polaroidFrame (Digicam) legitimately
+            // shrinks it to a 4:5 `window` inside the source's native
+            // bounds (see applyPolaroidFrame's doc comment). Cropping keeps
+            // the two coordinate spaces aligned so the composite below
+            // lines up pixel-for-pixel instead of compositing against
+            // out-of-frame content or an extent mismatch.
+            let croppedOriginal = original.cropped(to: image.extent)
+            result = blend(result, toward: croppedOriginal, amount: amount)
+        }
+        if adjustments.brightness != 0 || adjustments.contrast != 1.0 {
+            let filter = CIFilter.colorControls()
+            filter.inputImage = result
+            filter.saturation = 1.0 // this pass only ever touches brightness/contrast
+            filter.brightness = Float(adjustments.brightness)
+            filter.contrast = Float(adjustments.contrast)
+            result = filter.outputImage ?? result
+        }
+        return result
+    }
+
+    /// Standard CoreImage scalar-blend technique: force `styled`'s alpha to
+    /// a constant `amount` via CIColorMatrix (zeroing its own alpha
+    /// contribution, biasing to `amount`), then composite over `original`
+    /// (fully opaque) with sourceOverCompositing -- the result is a
+    /// pixel-wise lerp between the two by `amount`, without needing a
+    /// dedicated blend filter (CoreImage has none built in for this).
+    private static func blend(_ styled: CIImage, toward original: CIImage, amount: Double) -> CIImage {
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage = styled
+        matrix.rVector = CIVector(x: 1, y: 0, z: 0, w: 0)
+        matrix.gVector = CIVector(x: 0, y: 1, z: 0, w: 0)
+        matrix.bVector = CIVector(x: 0, y: 0, z: 1, w: 0)
+        matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        matrix.biasVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(amount))
+        guard let styledWithAlpha = matrix.outputImage else { return styled }
+
+        let composite = CIFilter.sourceOverCompositing()
+        composite.inputImage = styledWithAlpha
+        composite.backgroundImage = original
+        return (composite.outputImage ?? styled).cropped(to: styled.extent)
     }
 
     // MARK: - Op -> CIFilter

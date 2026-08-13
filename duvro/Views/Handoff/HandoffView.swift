@@ -38,7 +38,7 @@ struct HandoffView: View {
             guard let photo = sessionStore.photo(for: score.id) else { return nil }
             let variantName = sessionStore.pickedVariantName[score.id]
             guard let variant = pack.variants.first(where: { $0.name == variantName }) ?? pack.variants.first else { return nil }
-            return ExportService.Item(photo: photo, variant: variant)
+            return ExportService.Item(photo: photo, variant: variant, adjustments: sessionStore.adjustments(for: score.id))
         }
     }
 
@@ -390,9 +390,10 @@ struct HandoffView: View {
             guard renderCache[score.id] == nil, let photo = sessionStore.photo(for: score.id) else { continue }
             let variantName = sessionStore.pickedVariantName[score.id]
             guard let variant = variants.first(where: { $0.name == variantName }) ?? variants.first else { continue }
+            let adjustments = sessionStore.adjustments(for: score.id)
             Task {
                 let image = await Task.detached(priority: .userInitiated) {
-                    EditEngine.render(photo: photo, variant: variant)
+                    EditEngine.render(photo: photo, variant: variant, adjustments: adjustments)
                 }.value
                 renderCache[score.id] = image
             }

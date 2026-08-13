@@ -377,9 +377,10 @@ struct FinalReviewView: View {
             // commits a pick in Phase 5 before a photo can reach here.
             let variantName = sessionStore.pickedVariantName[score.id]
             guard let variant = variants.first(where: { $0.name == variantName }) ?? variants.first else { continue }
+            let adjustments = sessionStore.adjustments(for: score.id)
             Task {
                 let image = await Task.detached(priority: .userInitiated) {
-                    EditEngine.render(photo: photo, variant: variant)
+                    EditEngine.render(photo: photo, variant: variant, adjustments: adjustments)
                 }.value
                 renderCache[score.id] = image
             }

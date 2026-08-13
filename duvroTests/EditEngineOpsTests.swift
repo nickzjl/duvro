@@ -53,6 +53,39 @@ struct EditEngineOpsTests {
         }
     }
 
+    // MARK: - PhotoAdjustments (Phase 8 advanced sheet)
+
+    @Test func adjustmentsIntensityBlendsBackTowardTheOriginalPhoto() throws {
+        // A variant that darkens drastically, so intensity's blend-toward-
+        // original is unambiguous: at 1.0 (default) the variant's own dark
+        // look should dominate; at 0.0 the render should read back close
+        // to the source's own bright, untouched color.
+        let photo = try Self.makeTestPhoto(width: 200, height: 200, color: UIColor(red: 0.9, green: 0.6, blue: 0.2, alpha: 1))
+        let variant = EditVariant(name: "darken", ops: [
+            .colorControls(saturation: 1.0, brightness: -0.9, contrast: 1.0)
+        ])
+
+        let full = EditEngine.render(photo: photo, variant: variant, adjustments: PhotoAdjustments(intensity: 1.0))
+        let none = EditEngine.render(photo: photo, variant: variant, adjustments: PhotoAdjustments(intensity: 0.0))
+        let fullPixel = try Self.pixel(in: try #require(full.cgImage), x: 100, y: 100)
+        let nonePixel = try Self.pixel(in: try #require(none.cgImage), x: 100, y: 100)
+
+        #expect(fullPixel.r < 100, "intensity 1.0 should show the variant's own darkened look, not the original -- got r=\(fullPixel.r)")
+        #expect(nonePixel.r > 180, "intensity 0.0 should blend back to the original, near-untouched photo -- got r=\(nonePixel.r)")
+    }
+
+    @Test func adjustmentsBrightnessMeasurablyLightensTheOutput() throws {
+        let photo = try Self.makeTestPhoto(width: 200, height: 200, color: UIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
+        let variant = EditVariant(name: "flat", ops: [])
+
+        let base = EditEngine.render(photo: photo, variant: variant, adjustments: PhotoAdjustments())
+        let brightened = EditEngine.render(photo: photo, variant: variant, adjustments: PhotoAdjustments(brightness: 0.3))
+        let basePixel = try Self.pixel(in: try #require(base.cgImage), x: 100, y: 100)
+        let brightPixel = try Self.pixel(in: try #require(brightened.cgImage), x: 100, y: 100)
+
+        #expect(brightPixel.r > basePixel.r + 30, "brightness +0.3 should measurably lighten the photo -- base r=\(basePixel.r), brightened r=\(brightPixel.r)")
+    }
+
     // MARK: - Fixtures
 
     private static func makeTestPhoto(width: Int, height: Int, color: UIColor) throws -> Photo {
