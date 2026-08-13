@@ -37,19 +37,19 @@ enum SampleAssets {
     /// - front: "ab5ca9e1…" -- a near-exact match to the mockup's front
     ///   (largest, centered) card: a woman in a white dress, seen from
     ///   behind, standing in ocean waves at sunset.
-    /// - back / middle: NEITHER remaining photo matches the mockup's back
-    ///   card (a shadow-dance-on-a-wall photo, arms raised) or its middle
-    ///   card (a dark, mostly-obscured interior shot) in CONTENT -- both
-    ///   are true leftovers. Split between the two slots by overall tone
-    ///   only, since that's the only signal available: "5a9affaf…"
-    ///   (bright, warm, sunlit forest) reads closer to the back card's
-    ///   brighter warm tone; "7b337418…" (darker ocean-silhouette
-    ///   close-up) reads closer to the middle card's moodier, lower-key
-    ///   tone. Weak reasoning, flagged for correction in the session report.
+    /// - back: "new back slot" -- added this session specifically to fix
+    ///   this slot, and it's an exact match to the mockup's back card (a
+    ///   dancer's shadow on a wall, arms raised). Replaces "5a9affaf…"
+    ///   (a sunlit forest photo), which was only ever a weak, tone-matched
+    ///   guess -- that file has been deleted from SampleAssets/Welcome/.
+    /// - middle: "7b337418…" (a darker ocean-silhouette close-up) is still
+    ///   a true leftover -- it doesn't match the mockup's middle card (a
+    ///   dark, mostly-obscured interior shot) in content, only in overall
+    ///   tone. Still flagged for correction.
     static func welcomePhotos() -> WelcomePhotos {
         WelcomePhotos(
             front: image(subdirectory: welcomeSubdirectory, named: "ab5ca9e19d5b3d5f0aff16ead2a70219"),
-            back: image(subdirectory: welcomeSubdirectory, named: "5a9affaf0db487d3e60c759db04f7e8a"),
+            back: image(subdirectory: welcomeSubdirectory, named: "new back slot"),
             middle: image(subdirectory: welcomeSubdirectory, named: "7b3374183d029651d8cd29361e992973")
         )
     }
