@@ -109,7 +109,16 @@ struct PackPreviewSheet: View {
             let spacing: CGFloat = 8
             let bigColumnWidth = geo.size.width * 0.58
             let smallColumnWidth = geo.size.width - bigColumnWidth - spacing
-            let topRowHeight = geo.size.height * 0.66
+            // 0.66 (the original value) made the large tile noticeably
+            // TALLER/narrower than design/04-06's own large tile, which
+            // needed the fill-crop to cut away more of the source photo's
+            // top and bottom to cover that shape -- confirmed by pixel-
+            // measuring the mockup directly (its large tile is ~202x278pt,
+            // aspect ~0.73) rather than eyeballing. 0.60 reproduces that
+            // measured aspect almost exactly (0.58/0.60 column:row ratio
+            // -> ~0.73) without touching bigColumnWidth's 0.58, which
+            // wasn't reported as wrong.
+            let topRowHeight = geo.size.height * 0.60
             let bottomRowHeight = geo.size.height - topRowHeight - spacing
             let stackedTileHeight = (topRowHeight - spacing) / 2
             let bottomTileWidth = (geo.size.width - spacing) / 2
@@ -136,10 +145,19 @@ struct PackPreviewSheet: View {
             // number) is what actually prevents it. Caught on-device: an
             // earlier version without this line rendered the grid
             // correctly but let it silently overflow a few points past
-            // its intended 300pt, painting over quoteBlock below it.
+            // its intended height, painting over quoteBlock below it.
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(height: 300)
+        // 300pt (the original value) left the grid stopping about halfway
+        // down the sheet, with a large dead area above the CTA -- nowhere
+        // close to design/04-06, where the grid occupies most of the
+        // sheet's vertical space. 480pt is what's actually left once the
+        // header, quote block, and CTA row's own real heights are
+        // subtracted from a standard iPhone's usable height -- verified by
+        // screenshot comparison against the mockups, not derived from a
+        // device-size constant (this sheet has no GeometryReader of its
+        // own above this point to compute it from directly).
+        .frame(height: 480)
         .clipped() // belt-and-suspenders against the same overflow, regardless of cause
     }
 

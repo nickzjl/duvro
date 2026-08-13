@@ -308,7 +308,22 @@ nonisolated enum EditEngine {
             filter.inputImage = image
             filter.radius = Float(radius)
             filter.intensity = Float(intensity)
-            return filter.outputImage
+            // CIBloom (like other blur-family filters) reports an output
+            // extent PADDED beyond its input's -- it needs to sample past
+            // the edges to compute the glow, and CIImage's extent tracking
+            // grows to account for that. Uncropped, every op AFTER bloom in
+            // the chain (here: grain) inherits that larger extent as ITS
+            // OWN `image.extent`, so its content gets composited/cropped
+            // against a canvas bigger than the actual photo -- the padding
+            // strip has no real photo underneath, just whatever the
+            // downstream op paints (grain's raw noise, unblended, since
+            // there's nothing there to soft-light blend against). Cropping
+            // back to the pre-bloom extent here is the same fix already
+            // used elsewhere in this file for filters that can grow their
+            // own extent (applyLightLeak's gradient, applyGrain's noise) --
+            // Golden Hour is the only pack using bloom, which is why this
+            // was invisible in Digicam/Travel Film.
+            return filter.outputImage?.cropped(to: image.extent)
         case .grain(let intensity, let size):
             return applyGrain(intensity: intensity, size: size, to: image)
         case .fade(let amount):
