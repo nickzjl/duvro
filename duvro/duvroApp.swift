@@ -77,6 +77,10 @@ struct RootFlowView: View {
 /// automatically; no custom argv parsing needed.
 enum DebugLaunchScreen: String {
     case editFlow
+    /// Phase 8, Task 3: lands on EditFlowView with the advanced adjustments
+    /// sheet (Task 2) already OPEN -- simctl can't tap the real "advanced"
+    /// control to reach it, same reasoning as .packPreview below.
+    case advancedSheet
     case finalReview
     /// Phase 8, Task 3: lands directly on PackPreviewSheet -- simctl can't
     /// tap a pack card to reach it the real way, since a card (and the
@@ -157,6 +161,13 @@ struct DebugLaunchRootView: View {
                         CaptionView(sessionStore: sessionStore, pack: pack, onBack: {}, onContinue: { _ in })
                     case .vibeSelect, .welcome:
                         EmptyView() // unreachable -- both handled above, before this branch is ever entered
+                    case .advancedSheet:
+                        // Purely for screenshotting the sheet's initial
+                        // appearance (same convention as
+                        // packPreviewDestination) -- no showFinalReview/
+                        // showCaption/showHandoff chaining, since simctl
+                        // can't tap "done" or drag to dismiss either.
+                        EditFlowView(sessionStore: sessionStore, pack: pack, onComplete: {}, startWithAdvancedSheetOpen: true)
                     case .editFlow:
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
@@ -236,7 +247,7 @@ struct DebugLaunchRootView: View {
     /// still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
-        case .editFlow, .finalReview, .caption: return "golden_hour"
+        case .editFlow, .advancedSheet, .finalReview, .caption: return "golden_hour"
         case .packPreview: return DebugLaunch.packName
         case .vibeSelect, .welcome: return "golden_hour"
         }

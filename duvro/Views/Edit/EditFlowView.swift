@@ -67,6 +67,13 @@ struct EditFlowView: View {
     /// scoped single-photo edit: the caller is expected to splice the photo
     /// into the post (SessionStore.addRunnerUp) here.
     var onComplete: () -> Void
+    /// DEBUG-only knob (defaults false, so every real call site is
+    /// unaffected): seeds showAdvancedSheet's initial value so
+    /// duvroApp.swift's `-duvroDebugScreen advancedSheet` launch path can
+    /// land straight on the sheet OPEN -- simctl can't tap the real
+    /// "advanced" control to reach it the way a person would, same
+    /// reasoning as PackPreviewSheet's own debug launch path.
+    var startWithAdvancedSheetOpen: Bool = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -156,7 +163,10 @@ struct EditFlowView: View {
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
         .animation(.easeInOut(duration: 0.3), value: showAdvancedSheet)
-        .onAppear { enterPhoto(resetVariant: true) }
+        .onAppear {
+            enterPhoto(resetVariant: true)
+            if startWithAdvancedSheetOpen { openAdvancedSheet() }
+        }
         .onChange(of: currentIndex) { _, _ in enterPhoto(resetVariant: true) }
         .onChange(of: liveAdjustments) { _, _ in scheduleAdjustmentRender() }
         .onChange(of: showAdvancedSheet) { _, isShowing in
@@ -324,7 +334,7 @@ struct EditFlowView: View {
         }
     }
 
-    // MARK: - Skip (advanced control intentionally omitted -- see file header)
+    // MARK: - Skip + advanced (design/09's placement: both small, secondary, same row)
 
     private var utilityRow: some View {
         HStack {
@@ -335,6 +345,12 @@ struct EditFlowView: View {
             .foregroundStyle(Color(hex: "777169"))
 
             Spacer()
+
+            Button("advanced") {
+                openAdvancedSheet()
+            }
+            .font(.duvroCaption)
+            .foregroundStyle(Color(hex: "777169"))
         }
     }
 
