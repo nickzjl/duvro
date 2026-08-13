@@ -24,6 +24,19 @@ final class SessionStore {
 
     private(set) var photos: [Photo] = []
     private(set) var scores: [PhotoScore] = []
+    /// Mirrors ScoringService.isScoring (real flow only -- ImportView syncs
+    /// it via .onChange, same pattern as `scores` itself). Stays false for
+    /// every DEBUG launch path, which never touches a live ScoringService
+    /// at all (DebugFixture's scores are already complete before the
+    /// curation-progress screen even appears) -- so "not scoring" is the
+    /// CORRECT default for those flows, not just an unset placeholder.
+    /// This is what lets the curation-progress screen know when to stop
+    /// waiting and run the real selection pipeline, since counting
+    /// scores.count against photos.count is unreliable whenever even one
+    /// photo fails to score (a failed photo never lands in `scores` at
+    /// all -- see ScoringService's failedCount) -- which is EVERY photo,
+    /// every time, in the Simulator.
+    private(set) var isScoring: Bool = false
     private(set) var shortlist: ShortlistResult?
     /// The chosen post, as FallbackSelectionService (or, once it exists,
     /// the curation call) first proposed it -- immutable record of that
@@ -64,6 +77,10 @@ final class SessionStore {
 
     func setScores(_ scores: [PhotoScore]) {
         self.scores = scores
+    }
+
+    func setScoring(_ inProgress: Bool) {
+        isScoring = inProgress
     }
 
     func setShortlist(_ shortlist: ShortlistResult) {

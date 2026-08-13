@@ -31,6 +31,20 @@ struct ImportView: View {
     /// OUTPUT is written into sessionStore rather than read from them
     /// directly, so Phase 5/6 screens have one place to read from.
     @State private var sessionStore = SessionStore()
+    /// NOT #if DEBUG -- was, until this session (BUILD_ROADMAP Known
+    /// gotchas item 9: a Release build imported photos but never scored
+    /// them, since nothing outside the DEBUG "score photos" button ever
+    /// called this). Kicked off automatically once import completes (see
+    /// the .onChange(of: importService.isImporting) below); the DEBUG
+    /// "score photos" button in debugScoringControls still works exactly
+    /// as before, just against this same now-always-present instance.
+    @State private var scoringService = ScoringService()
+    /// Guards the auto-kickoff below against firing twice -- there's no
+    /// current path back to ImportView with more photos to add after the
+    /// first picker session, but this is cheap insurance against that
+    /// changing later (same defensive spirit as continueButton's own
+    /// comment on realFlowPack).
+    @State private var hasStartedAutoScoring = false
 
     // MARK: - Phase 8, Task 4: the real (non-DEBUG) post-import flow
     /// ONE persistent fullScreenCover for the whole real flow -- shown
@@ -71,7 +85,6 @@ struct ImportView: View {
     @State private var vibeSelectBlockedMessage: String?
 
     #if DEBUG
-    @State private var scoringService = ScoringService()
     @State private var showScoringGrid = false
     @State private var showShortlistDebug = false
     @State private var showEditDebug = false
@@ -162,10 +175,36 @@ struct ImportView: View {
         .onChange(of: importService.photos.count) {
             sessionStore.setPhotos(importService.photos)
         }
-        #if DEBUG
+        // scoringService.scores now grows INCREMENTALLY, one photo at a
+        // time (ScoringService change, this session) -- syncing on every
+        // .count change is what lets the curation-progress screen read
+        // "whatever's scored so far" via sessionStore, not just the
+        // final batch. Was #if DEBUG-only; scoringService itself no
+        // longer is (see its own doc comment above).
         .onChange(of: scoringService.scores.count) {
             sessionStore.setScores(scoringService.scores)
         }
+        .onChange(of: scoringService.isScoring) { _, inProgress in
+            sessionStore.setScoring(inProgress)
+        }
+        // Task 1 (BUILD_ROADMAP Known gotchas item 9): scoring starts on
+        // its own, in the background, the moment import finishes -- the
+        // user goes straight to vibe selection and browses pack previews
+        // while Vision works, so by the time "use this vibe" is tapped
+        // most or all of it is already done. Fires once (hasStartedAutoScoring)
+        // on the wasImporting-true -> isImportingNow-false transition,
+        // the same "import is complete enough" condition continueButton's
+        // own gate already uses (minimumPhotos reached, not mid-import).
+        // Scores importService.photos directly, not sessionStore.photos --
+        // both are updated from the same source, but importService's own
+        // copy has no cross-object sync timing to reason about.
+        .onChange(of: importService.isImporting) { wasImporting, isImportingNow in
+            guard wasImporting, !isImportingNow else { return }
+            guard importService.photos.count >= minimumPhotos, !hasStartedAutoScoring else { return }
+            hasStartedAutoScoring = true
+            Task { await scoringService.score(photos: importService.photos) }
+        }
+        #if DEBUG
         .sheet(isPresented: $showScoringGrid) {
             ScoringDebugGridView(
                 photos: sessionStore.photos,

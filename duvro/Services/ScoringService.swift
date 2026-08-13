@@ -100,9 +100,6 @@ final class ScoringService {
             }
         }
 
-        var rawResults: [RawPhotoScore] = []
-        rawResults.reserveCapacity(photos.count)
-
         await withTaskGroup(of: ScoreOutcome.self) { group in
             var nextIndex = 0
             func startNext() {
@@ -117,8 +114,18 @@ final class ScoringService {
             while let outcome = await group.next() {
                 scoredCount += 1
                 switch outcome {
-                case .success(let result):
-                    rawResults.append(result)
+                case .success(let raw):
+                    // Appended to `scores` AS EACH PHOTO COMPLETES, not
+                    // batched into a local array and assigned once at the
+                    // end -- `scores` is @Observable, so a caller (the
+                    // curation-progress screen) can read "whatever's
+                    // scored so far" at any moment, not just after the
+                    // whole pass finishes. Concurrent tasks finish in
+                    // completion order, not `photos`' own order -- that
+                    // was already true of the old batched-at-the-end
+                    // array too, so nothing downstream that ranks by
+                    // compositeScore rather than position is affected.
+                    scores.append(Self.assemblePhotoScore(from: raw))
                 case .failure(let photoID, let error):
                     failedCount += 1
                     let description = String(describing: error)
@@ -134,47 +141,45 @@ final class ScoringService {
             }
         }
 
-        // Assemble final scores.
-        var assembled: [PhotoScore] = []
-        assembled.reserveCapacity(rawResults.count)
-        for raw in rawResults {
-            let hasFaces = !raw.faceObservations.isEmpty
-            let hasHumans = raw.humanCount > 0
-            let labels = raw.classificationLabels.map(\.identifier)
-            let category = CategoryMapper.shared.category(hasFaces: hasFaces, hasHumans: hasHumans, labels: labels)
-            let bestQuality = raw.faceObservations.compactMap { $0.captureQuality?.score }.max() ?? 0
-
-            let score = PhotoScore(
-                id: raw.photoID,
-                rawAestheticScore: raw.rawAestheticScore,
-                isUtility: raw.isUtility,
-                faceCount: raw.faceObservations.count,
-                bestFaceQuality: bestQuality,
-                humanCount: raw.humanCount,
-                faceBoxes: raw.faceObservations.map { $0.boundingBox.cgRect },
-                humanBoxes: raw.humanBoxes,
-                sourceAspectRatio: raw.sourceAspectRatio,
-                classificationLabels: raw.classificationLabels,
-                category: category,
-                featurePrint: raw.featurePrint,
-                textCoverage: raw.textCoverage,
-                textBlockCount: raw.textBlockCount,
-                rejectionReason: raw.rejectionReason
-            )
-            assembled.append(score)
-        }
-
-        scores = assembled
         peakTracker.cancel()
         peakMemoryMB = max(peakMemoryMB, MemoryMonitor.residentMB())
         elapsedSeconds = Date().timeIntervalSince(startTime)
         isScoring = false
 
-        let rejectedCount = assembled.count { $0.isHardRejected }
-        print("[scoring] \(assembled.count)/\(photos.count) scored (\(rejectedCount) rejected), \(failedCount) failed, in \(String(format: "%.2f", elapsedSeconds))s, peak resident memory \(String(format: "%.1f", peakMemoryMB)) MB")
+        let rejectedCount = scores.count { $0.isHardRejected }
+        print("[scoring] \(scores.count)/\(photos.count) scored (\(rejectedCount) rejected), \(failedCount) failed, in \(String(format: "%.2f", elapsedSeconds))s, peak resident memory \(String(format: "%.1f", peakMemoryMB)) MB")
         if !failureReasons.isEmpty {
             print("[scoring] failure reasons: \(failureReasons)")
         }
+    }
+
+    /// Factored out of the old end-of-pass assembly loop so a single
+    /// completed photo can be converted the instant it arrives (see the
+    /// `.success` case above) instead of waiting for the whole batch.
+    nonisolated private static func assemblePhotoScore(from raw: RawPhotoScore) -> PhotoScore {
+        let hasFaces = !raw.faceObservations.isEmpty
+        let hasHumans = raw.humanCount > 0
+        let labels = raw.classificationLabels.map(\.identifier)
+        let category = CategoryMapper.shared.category(hasFaces: hasFaces, hasHumans: hasHumans, labels: labels)
+        let bestQuality = raw.faceObservations.compactMap { $0.captureQuality?.score }.max() ?? 0
+
+        return PhotoScore(
+            id: raw.photoID,
+            rawAestheticScore: raw.rawAestheticScore,
+            isUtility: raw.isUtility,
+            faceCount: raw.faceObservations.count,
+            bestFaceQuality: bestQuality,
+            humanCount: raw.humanCount,
+            faceBoxes: raw.faceObservations.map { $0.boundingBox.cgRect },
+            humanBoxes: raw.humanBoxes,
+            sourceAspectRatio: raw.sourceAspectRatio,
+            classificationLabels: raw.classificationLabels,
+            category: category,
+            featurePrint: raw.featurePrint,
+            textCoverage: raw.textCoverage,
+            textBlockCount: raw.textBlockCount,
+            rejectionReason: raw.rejectionReason
+        )
     }
 
     // MARK: - Per-photo Vision pipeline (off the main actor)
