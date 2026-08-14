@@ -51,6 +51,7 @@ The mockups mix two visual languages. **Unify everything to this system:**
 ## 3. Confirmed flow decisions (these override earlier PRD drafts)
 
 - **Vibe selection has no separate "preview" link.** Tapping a pack card opens its preview sheet; the sheet's "use this vibe" button is the CTA that both selects the pack and starts curation. This deliberately forces the user to see each pack's look before committing.
+- **Pack preview sample grid currently shows raw, unedited originals — deliberate and TEMPORARY, not the final design.** The preview's whole purpose (prd.md §4 step 4) is to show what each pack actually looks like, which is meaningless while all three packs are untuned (BUILD_ROADMAP Deferred work register item 1) — a rendered preview right now would show the untuned look, not the pack. Restore rendering each sample through the pack's first variant (`PackPreviewSheet`'s git history has the previous version, including its render cache) once tuning is done; don't treat "shows real photos, unedited" as a settled decision.
 - **Caption screen offers ONE suggestion** (pre-filled, editable) plus regenerate — not three cards. Rationale: the user has already made many choices during editing; this reduces decision load at the end.
 - **No "ready to post? / take another look" branch.** After the last edit, the user lands directly on the final review screen ("the final touches") where they can reorder, remove, and swap in runner-ups, then continue to caption. Funneling forward avoids handing the user a moment to second-guess and restart.
 

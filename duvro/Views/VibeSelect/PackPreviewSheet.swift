@@ -20,12 +20,14 @@
 //  images existed: swapping the source later is a change to the caller,
 //  not to this file.
 //
-//  CACHING (Phase 8 acceptance: "previews load instantly"): renders are
-//  cached in PackPreviewRenderCache, which lives outside this view's own
-//  @State so it survives the sheet being dismissed and reopened, or a
-//  different pack's sheet opening in between -- unlike EditFlowView's
-//  renderCache, which only needs to survive within one edit session's
-//  view lifetime.
+//  RAW ORIGINALS, NOT RENDERED (deliberate, temporary -- see UI_NOTES §3):
+//  the sample grid shows samplePhotos[index].thumbnail directly, unedited.
+//  Previously rendered each sample through the pack's first variant (with
+//  a PackPreviewRenderCache to keep reopening instant); removed rather
+//  than left dangling-but-unused, since the packs are untuned and a
+//  rendered preview right now would show the untuned look, not what the
+//  pack is meant to look like. Restore the variant-rendering + cache pair
+//  (git history has the previous version) once pack tuning is done.
 //
 
 import SwiftUI
@@ -43,7 +45,6 @@ struct PackPreviewSheet: View {
     var onUseThisVibe: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var renderedImages: [UIImage] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,9 +62,6 @@ struct PackPreviewSheet: View {
             ctaStack
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
-        .task(id: pack.id) {
-            await renderIfNeeded()
-        }
     }
 
     // MARK: - Header (pack title + variant names, UI_NOTES §1 + fix 3)
@@ -179,14 +177,9 @@ struct PackPreviewSheet: View {
     /// clip always happens at the final, correct size.
     private func tile(_ index: Int, size: CGSize) -> some View {
         Group {
-            if renderedImages.indices.contains(index) {
-                Image(uiImage: renderedImages[index])
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else if samplePhotos.indices.contains(index) {
-                // Rendering hasn't finished yet -- the unedited thumbnail,
-                // not a blank tile, same fail-safe-toward-something-visible
-                // spirit as EditEngine/EditFlowView.
+            if samplePhotos.indices.contains(index) {
+                // Raw original, unedited -- see file header. Temporary
+                // while the packs are untuned; not a rendered variant.
                 Image(uiImage: samplePhotos[index].thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -256,54 +249,5 @@ struct PackPreviewSheet: View {
         .padding(.top, 12)
         .padding(.bottom, 8)
         .background(Color(hex: "F7F4EE"))
-    }
-
-    // MARK: - Rendering
-
-    /// Every sample photo rendered in the pack's FIRST variant -- a single
-    /// representative look, matching the mockups (all 5 images read as one
-    /// consistent grade, not a mix of the pack's 3 variants). Ambiguous
-    /// decision, made alone: neither prd.md nor UI_NOTES specifies which
-    /// variant a multi-variant pack should preview with.
-    private func renderIfNeeded() async {
-        guard let variant = pack.variants.first, !samplePhotos.isEmpty else { return }
-        if let cached = await PackPreviewRenderCache.renders(for: pack, samplePhotos: samplePhotos) {
-            renderedImages = cached
-            return
-        }
-        let photos = samplePhotos
-        let rendered = await Task.detached(priority: .userInitiated) {
-            photos.map { EditEngine.render(photo: $0, variant: variant) }
-        }.value
-        renderedImages = rendered
-        await PackPreviewRenderCache.store(rendered, for: pack, samplePhotos: samplePhotos)
-    }
-}
-
-/// Outlives any single PackPreviewSheet instance (app-process-lifetime, in-
-/// memory only -- no disk persistence, nothing here claims to survive a
-/// relaunch) so reopening a pack's sheet, or opening a second pack's sheet
-/// and coming back to the first, is instant rather than re-rendering.
-/// @MainActor: UIImage isn't officially Sendable, and every render/read
-/// here already happens from MainActor-adjacent contexts (SwiftUI view
-/// tasks) -- matching, not fighting, that constraint.
-@MainActor
-enum PackPreviewRenderCache {
-    private static var storage: [String: [UIImage]] = [:]
-
-    static func renders(for pack: VibePack, samplePhotos: [Photo]) -> [UIImage]? {
-        storage[key(pack: pack, samplePhotos: samplePhotos)]
-    }
-
-    static func store(_ images: [UIImage], for pack: VibePack, samplePhotos: [Photo]) {
-        storage[key(pack: pack, samplePhotos: samplePhotos)] = images
-    }
-
-    /// Keyed on pack id + the exact sample photo IDs shown, in order -- if
-    /// the caller ever changes which photos represent a pack (e.g. real
-    /// bundled images replacing DebugFixture placeholders), the cache
-    /// naturally misses instead of serving stale renders of the wrong set.
-    private static func key(pack: VibePack, samplePhotos: [Photo]) -> String {
-        pack.id + "|" + samplePhotos.map { $0.id.uuidString }.joined(separator: ",")
     }
 }
