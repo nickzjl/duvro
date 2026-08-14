@@ -42,33 +42,34 @@
 //  screen would flash by (see its own doc comment). Release has NO
 //  floor: "the screen lasts exactly as long as the real work takes."
 //
-//  STATUS COPY: UI_NOTES §4's 2nd line ("sorting the moments…") was
-//  already flagged PROPOSED/NOT FINAL, itself a replacement for
-//  "finding familiar faces…" (identity clustering was removed --
-//  BUILD_ROADMAP, ScoringService's own header). PROPOSING A THIRD
-//  WORDING here, ALSO not final, flagged for review: "counting who's
-//  with you…". Reasoning: face/human detection (count + capture
-//  quality, feeding the group bonus) genuinely still runs in
-//  ScoringService's Stage 2 -- this describes that real mechanism
-//  without implying the removed recurring-person recognition.
+//  STATUS COPY: settled -- UI_NOTES §4's 2nd line is "finding familiar
+//  faces…". Two replacements were tried and rejected during this
+//  screen's build ("sorting the moments…", "counting who's with you…"),
+//  both more mechanically accurate to what Stage 2 actually runs now
+//  that identity clustering is gone, but the product call is that warm
+//  and reads-well beats literal accuracy here. See UI_NOTES §4's own
+//  note for the same conclusion.
 //
-//  SHOWCASE VARIANT DECISION (flagged for review, UI_NOTES doesn't
-//  specify): renders each showcase card in the chosen pack's FIRST
-//  variant, not unedited. Reasoning: matches what the edit screen
-//  itself pre-selects on arrival (EditFlowView's displayedVariantIndex
-//  defaults to 0), so the showcase doesn't show one look and then jump
-//  to a different one one screen later; and the user already committed
-//  to this pack by tapping "use this vibe," so leading with its look
-//  reads as "here's your vibe," not just "here are your photos."
-//  PERFORMANCE: rendered off-thread as soon as the final selection is
-//  known (well before the collage phase begins, overlapped with the
-//  tail of the shuffle phase and the DEBUG minimum's own wait) via
-//  EditEngine.render -- measured elsewhere in this codebase at
-//  8-17ms/variant on device, so even 20 photos in ONE variant is on the
-//  order of ~200-350ms total, comfortably absorbed by the shuffle
-//  phase's own multi-second runway rather than delaying the collage's
-//  start. Falls back to the photo's own thumbnail (EditFlowView's same
-//  fail-safe pattern) for any card whose render isn't ready yet.
+//  SHOWCASE VARIANT DECISION: renders showcase cards across ALL THREE
+//  of the chosen pack's variants, cycling in finalSelection order
+//  (card i -> pack.variants[i % pack.variants.count]) rather than
+//  assigning randomly -- this guarantees every variant appears and none
+//  clusters together regardless of n. Card 0 -- CollageLayout's
+//  front-and-center, largest, top-z-order slot, and finalSelection's
+//  strongest photo since it's composite-ranked -- always gets
+//  pack.variants[0], the pack's signature look, so the most prominent
+//  card leads with it. Reasoning: the collage is the hook, and variety
+//  within one aesthetic (a Y2K date stamp next to a Polaroid frame next
+//  to a light leak, for Digicam) is more compelling than n cards at the
+//  same grade. PERFORMANCE: this is NOT 3x the render work -- each
+//  photo still renders exactly once (in its assigned variant, not all
+//  three), so the total render count is unchanged from the
+//  single-variant version, still ~n renders at 8-17ms/render measured
+//  elsewhere in this codebase, comfortably absorbed by the shuffle
+//  phase's runway. Rendered off-thread as soon as the final selection
+//  is known (well before the collage phase begins). Falls back to the
+//  photo's own thumbnail (EditFlowView's same fail-safe pattern) for
+//  any card whose render isn't ready yet.
 //
 //  CONTINUOUS TRANSITION (Task 4, the hard part): cards that are both
 //  (a) in the shuffle snapshot's currently-visible window at resolve
@@ -119,7 +120,7 @@ struct CurationSequenceView: View {
 
     private static let statusLines = [
         "removing duplicates…",
-        "counting who's with you…", // PROPOSED, flagged for review -- see file header
+        "finding familiar faces…", // settled -- see file header
         "analyzing visual composition…",
         "curating the narrative…"
     ]
@@ -335,13 +336,23 @@ struct CurationSequenceView: View {
         sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
         finalSelection = chosen.selected
 
-        // Kick off variant-1 rendering immediately, off-thread, so it's
-        // ready (or close to it) by the time the collage phase actually
-        // reveals each card -- see file header's performance note.
-        if let variant = pack.variants.first {
-            let photos = finalSelection.compactMap { sessionStore.photo(for: $0.id) }
+        // Kick off rendering immediately, off-thread, so it's ready (or
+        // close to it) by the time the collage phase actually reveals
+        // each card. Cycles through all three of the pack's variants in
+        // finalSelection order -- card 0 (front-and-center) gets
+        // variants[0], the signature look -- rather than rendering every
+        // card in the same one. See file header's SHOWCASE VARIANT
+        // DECISION for why, and its PERFORMANCE note for why this is
+        // still ~n renders total, not 3n.
+        if !pack.variants.isEmpty {
+            let assignments = finalSelection.enumerated().compactMap { index, score -> (UUID, Photo, EditVariant)? in
+                guard let photo = sessionStore.photo(for: score.id) else { return nil }
+                return (score.id, photo, pack.variants[index % pack.variants.count])
+            }
             let rendered = await Task.detached(priority: .userInitiated) {
-                Dictionary(uniqueKeysWithValues: photos.map { ($0.id, EditEngine.render(photo: $0, variant: variant)) })
+                Dictionary(uniqueKeysWithValues: assignments.map { id, photo, variant in
+                    (id, EditEngine.render(photo: photo, variant: variant))
+                })
             }.value
             renderedImages = rendered
         }

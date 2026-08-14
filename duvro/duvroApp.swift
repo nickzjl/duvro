@@ -343,8 +343,8 @@ struct DebugLaunchRootView: View {
     /// still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
-        case .editFlow, .advancedSheet, .finalReview, .caption, .curationSequence: return "golden_hour"
-        case .packPreview: return DebugLaunch.packName
+        case .editFlow, .advancedSheet, .finalReview, .caption: return "golden_hour"
+        case .packPreview, .curationSequence: return DebugLaunch.packName
         case .vibeSelect, .welcome: return "golden_hour"
         }
     }
