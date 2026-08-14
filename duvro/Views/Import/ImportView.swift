@@ -70,6 +70,16 @@ struct ImportView: View {
     /// confirmed works end-to-end on device.
     @State private var showVibeSelect = false
     @State private var realFlowPack: VibePack?
+    /// The user's resolved photo-count choice, carried from "use this
+    /// vibe" through to CurationSequenceView (which now owns running
+    /// ShortlistService/FallbackSelectionService/RunnerUpService itself,
+    /// against the FULL score set once scoring finishes -- see that
+    /// view's own header for why this moved out of handleVibeSelected).
+    @State private var realFlowCount = FallbackSelectionService.fallbackCount
+    /// Phase 9/10: CurationSequenceView sits between "use this vibe" and
+    /// EditFlowView. false = still on that screen; true = its onComplete
+    /// fired, proceed to the existing chain below unchanged.
+    @State private var curationComplete = false
     @State private var showFinalReviewReal = false
     /// Phase 9: Final Review -> Caption -> Handoff. `realFlowCaption` is
     /// the user's final (possibly hand-edited) text, passed to Handoff.
@@ -121,6 +131,7 @@ struct ImportView: View {
     /// testing that screen in isolation.
     @State private var showVibeSelectDebug = false
     @State private var vibeSelectDebugResult: (pack: VibePack, count: Int)?
+    @State private var vibeSelectDebugCurationComplete = false
     @State private var showVibeSelectDebugFinalReview = false
     @State private var showVibeSelectDebugCaption = false
     @State private var vibeSelectDebugCaption = ""
@@ -325,14 +336,14 @@ struct ImportView: View {
 
     /// Content of the real flow's ONE fullScreenCover. `realFlowPack ==
     /// nil`: still showing VibeSelectionView itself. Once set ("use this
-    /// vibe" fired), chains forward into editFlow -> finalReview ->
-    /// handoff by swapping THIS function's output -- the cover itself
-    /// (showVibeSelect) never toggles again until the user backs all the
-    /// way out. Exact same structure as vibeSelectDebugDestination()
-    /// below, which the user confirmed already works end-to-end on
-    /// device; this is that pattern applied to the real (non-DEBUG) path,
-    /// which previously used four separate fullScreenCovers instead (the
-    /// Task 1 bug).
+    /// vibe" fired), chains forward into curationSequence -> editFlow ->
+    /// finalReview -> handoff by swapping THIS function's output -- the
+    /// cover itself (showVibeSelect) never toggles again until the user
+    /// backs all the way out. Exact same structure as
+    /// vibeSelectDebugDestination() below, which the user confirmed
+    /// already works end-to-end on device; this is that pattern applied
+    /// to the real (non-DEBUG) path, which previously used four separate
+    /// fullScreenCovers instead (the Task 1 bug).
     @ViewBuilder
     private func realFlowDestination() -> some View {
         if let realFlowPack {
@@ -353,9 +364,18 @@ struct ImportView: View {
                     showFinalReviewReal = false
                     showCaptionReal = true
                 }
-            } else {
+            } else if curationComplete {
                 EditFlowView(sessionStore: sessionStore, pack: realFlowPack) {
                     showFinalReviewReal = true
+                }
+            } else {
+                // prd.md §4 steps 5-6, UI_NOTES §4: curation progress ->
+                // showcase, one continuous view, between "use this vibe"
+                // and the first edit screen. PHASE 9/10 CURATION
+                // INSERTION POINT closed -- this is what used to jump
+                // straight to EditFlowView.
+                CurationSequenceView(sessionStore: sessionStore, pack: realFlowPack, count: realFlowCount) {
+                    curationComplete = true
                 }
             }
         } else {
@@ -368,39 +388,35 @@ struct ImportView: View {
         }
     }
 
-    /// The real (non-DEBUG) "use this vibe" hand-off -- Task 4 spec:
-    /// "vibe selection hands off to the existing shortlist/fallback path
-    /// for now." Mirrors loadFixtureIntoSessionStore's exact pipeline call
-    /// order (ShortlistService -> FallbackSelectionService -> RunnerUpService),
-    /// just against sessionStore.scores (real Vision output, once
-    /// something produces it) instead of DebugFixture's fabricated ones,
-    /// and with the user's own resolved count rather than the default 7.
+    /// The real (non-DEBUG) "use this vibe" hand-off. PHASE 9/10 CURATION
+    /// INSERTION POINT, now closed: this used to run
+    /// ShortlistService -> FallbackSelectionService -> RunnerUpService
+    /// itself and jump straight to EditFlowView -- that whole pipeline
+    /// call now belongs to CurationSequenceView (realFlowDestination's
+    /// new branch), which needs to run it AFTER waiting for scoring to
+    /// actually finish, not synchronously here at tap time. This
+    /// function's only job now is recording the choice and letting the
+    /// cover's content swap to that screen.
     ///
-    /// PHASE 9/10 CURATION INSERTION POINT: prd.md §4 steps 5-6 ("curation
-    /// progress" / "curation showcase") aren't built this session --
-    /// EditFlowView opens directly instead of passing through them first.
-    ///
-    /// Task 1 fix: only sets `realFlowPack` now -- does NOT touch
-    /// showVibeSelect. The cover stays presented; realFlowDestination()
-    /// reacts to realFlowPack changing and swaps its content. Previously
-    /// this also set showVibeSelect = false (dismiss) and a separate
-    /// showEditFlowReal = true (present) in the same call, which raced
-    /// against PackPreviewSheet's own dismiss() one frame earlier -- see
-    /// showVibeSelect's doc comment for the full diagnosis.
+    /// Task 1 fix (unrelated, preserved): only sets `realFlowPack` --
+    /// does NOT touch showVibeSelect. The cover stays presented;
+    /// realFlowDestination() reacts to realFlowPack changing and swaps
+    /// its content. See showVibeSelect's doc comment for the full
+    /// present-while-dismissing diagnosis this avoids.
     private func handleVibeSelected(pack: VibePack, count: Int) {
-        guard !sessionStore.scores.isEmpty else {
-            // Expected today outside DEBUG tooling: ScoringService is #if
-            // DEBUG-only (see the state vars above), so a Release build
-            // reaching this screen has no Vision scores to shortlist from
-            // yet. Fail safe -- surface why, don't crash or silently no-op.
+        // `|| sessionStore.isScoring`: Task 1 starts scoring in the
+        // background right after import, so by the time this fires,
+        // scores may be PARTIALLY populated (or even still empty, if
+        // scoring only just started) without that meaning there's
+        // nothing to curate -- CurationSequenceView waits for scoring to
+        // actually finish before running selection. Only block if
+        // there's truly nothing scored AND nothing scoring.
+        guard !sessionStore.scores.isEmpty || sessionStore.isScoring else {
             vibeSelectBlockedMessage = "add some photos and score them first — there's nothing to curate yet."
             return
         }
-        let shortlist = ShortlistService.buildShortlist(from: sessionStore.scores)
-        sessionStore.setShortlist(shortlist)
-        let chosen = FallbackSelectionService.select(from: shortlist, count: count)
-        sessionStore.setChosenSelection(chosen)
-        sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+        realFlowCount = count
+        curationComplete = false
         realFlowPack = pack
     }
 
@@ -451,9 +467,13 @@ struct ImportView: View {
                 FinalReviewView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
                     showVibeSelectDebugCaption = true
                 }
-            } else {
+            } else if vibeSelectDebugCurationComplete {
                 EditFlowView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
                     showVibeSelectDebugFinalReview = true
+                }
+            } else {
+                CurationSequenceView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack, count: vibeSelectDebugResult.count) {
+                    vibeSelectDebugCurationComplete = true
                 }
             }
         } else {
@@ -462,17 +482,16 @@ struct ImportView: View {
                 samplePhotos: { pack in SampleAssets.packPreviewPhotos(for: pack.id) },
                 packThumbnail: { pack in SampleAssets.packThumbnail(for: pack.id) },
                 onVibeSelected: { pack, count in
-                    // Same real pipeline as loadFixtureIntoSessionStore's
-                    // own calls, just against the user's resolved count
-                    // instead of the default 7 -- sessionStore.scores is
-                    // already the fixture's fabricated scores by this
-                    // point ("vibe select" calls loadFixtureIntoSessionStore
-                    // before presenting this view).
-                    let shortlist = ShortlistService.buildShortlist(from: sessionStore.scores)
-                    sessionStore.setShortlist(shortlist)
-                    let chosen = FallbackSelectionService.select(from: shortlist, count: count)
-                    sessionStore.setChosenSelection(chosen)
-                    sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+                    // sessionStore.scores is already the fixture's
+                    // fabricated scores by this point ("vibe select"
+                    // calls loadFixtureIntoSessionStore before presenting
+                    // this view) and sessionStore.isScoring is false (no
+                    // live ScoringService in this chain at all) -- so
+                    // CurationSequenceView's own wait-for-scoring loop
+                    // resolves immediately and just runs the real
+                    // selection pipeline itself now, same call order this
+                    // closure used to make inline.
+                    vibeSelectDebugCurationComplete = false
                     vibeSelectDebugResult = (pack, count)
                 }
             )
@@ -579,6 +598,7 @@ struct ImportView: View {
             // yet), but cheap insurance against a stale realFlowPack from
             // a prior run if that ever changes.
             realFlowPack = nil
+            curationComplete = false
             showFinalReviewReal = false
             showHandoffReal = false
             showVibeSelect = true

@@ -102,6 +102,14 @@ enum DebugLaunchScreen: String {
     /// convention as editFlow/finalReview) -- simctl can't tap through
     /// Final Review's "add a caption" to reach it the real way.
     case caption
+    /// Phase 9/10: lands directly on CurationSequenceView (shuffling
+    /// progress -> showcase collage, one continuous view) using
+    /// DebugFixture's scores -- so it can be replayed without a full
+    /// import, matching every other entry point in this file.
+    /// `-duvroDebugCount` (below) sets how many photos it resolves to,
+    /// for testing the showcase's layout at both ends of prd.md §4 step
+    /// 3's 4-20 range.
+    case curationSequence
 }
 
 enum DebugLaunch {
@@ -116,6 +124,17 @@ enum DebugLaunch {
     /// existing hardcoded choice) when unset or not a real pack id.
     static var packName: String {
         UserDefaults.standard.string(forKey: "duvroDebugPack") ?? "golden_hour"
+    }
+
+    /// Only consulted for `.curationSequence` -- how many photos the
+    /// debug fixture's fallback selection resolves to, e.g.
+    /// `-duvroDebugScreen curationSequence -duvroDebugCount 20`. Clamped
+    /// to prd.md §4 step 3's own 4...20 range; defaults to 7
+    /// (FallbackSelectionService.fallbackCount) when unset.
+    static var count: Int {
+        let raw = UserDefaults.standard.integer(forKey: "duvroDebugCount")
+        guard raw > 0 else { return FallbackSelectionService.fallbackCount }
+        return min(max(raw, 4), 20)
     }
 }
 
@@ -145,6 +164,14 @@ struct DebugLaunchRootView: View {
     /// edit flow with this pack," reusing showFinalReview/showCaption/
     /// showHandoff above for the rest of the chain.
     @State private var vibeSelectResult: (pack: VibePack, count: Int)?
+    /// vibeSelectDestination's own curation-progress/showcase gate --
+    /// same role as ImportView's curationComplete.
+    @State private var vibeSelectCurationComplete = false
+    /// .curationSequence's own one-way gate, mirroring editFlow's
+    /// showFinalReview -- CurationSequenceView's onComplete flips this,
+    /// landing on EditFlowView, same one-way pattern as every other
+    /// entry point in this file.
+    @State private var curationSequenceComplete = false
 
     var body: some View {
         Group {
@@ -168,6 +195,16 @@ struct DebugLaunchRootView: View {
                         // showCaption/showHandoff chaining, since simctl
                         // can't tap "done" or drag to dismiss either.
                         EditFlowView(sessionStore: sessionStore, pack: pack, onComplete: {}, startWithAdvancedSheetOpen: true)
+                    case .curationSequence:
+                        if curationSequenceComplete {
+                            EditFlowView(sessionStore: sessionStore, pack: pack) {
+                                showFinalReview = true
+                            }
+                        } else {
+                            CurationSequenceView(sessionStore: sessionStore, pack: pack, count: DebugLaunch.count) {
+                                curationSequenceComplete = true
+                            }
+                        }
                     case .editFlow:
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
@@ -228,15 +265,74 @@ struct DebugLaunchRootView: View {
         }
         .task {
             guard let bundle = DebugFixture.load() else { return }
-            sessionStore.setPhotos(bundle.photos)
-            sessionStore.setScores(bundle.scores)
-            let shortlist = ShortlistService.buildShortlist(from: bundle.scores)
+            // .curationSequence needs to test the showcase's layout at
+            // BOTH ends of prd.md §4 step 3's 4-20 range, but
+            // DebugFixture only has 15 real photos, all landing in their
+            // own singleton clusters (no featurePrint -- see that file's
+            // own doc comment), so 15 is this fixture's real ceiling.
+            // Padded with CLONES (fresh UUID, same underlying image/
+            // score content) only when testing above that -- clearly
+            // synthetic/duplicated, flagged in the session report, and
+            // ONLY for this one debug launch case; every other entry
+            // point in this file keeps the real, unpadded 15.
+            let photos = screen == .curationSequence ? Self.padded(bundle.photos, to: DebugLaunch.count) : bundle.photos
+            let scores = screen == .curationSequence ? Self.padded(bundle.scores, photos: photos, from: bundle.photos) : bundle.scores
+            sessionStore.setPhotos(photos)
+            sessionStore.setScores(scores)
+            let shortlist = ShortlistService.buildShortlist(from: scores)
             sessionStore.setShortlist(shortlist)
-            let chosen = FallbackSelectionService.select(from: shortlist)
+            let requestedCount = screen == .curationSequence ? DebugLaunch.count : FallbackSelectionService.fallbackCount
+            let chosen = FallbackSelectionService.select(from: shortlist, count: requestedCount)
             sessionStore.setChosenSelection(chosen)
             sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
             loaded = true
         }
+    }
+
+    /// Clones `source` (cycling through it) with FRESH UUIDs until
+    /// reaching `minimumCount`, if it's not already that long -- see the
+    /// .task's own comment for why this exists (only ever used for
+    /// .curationSequence's layout-scaling test, never any real content
+    /// path). originalURL/downsampledURL/thumbnail are all reused as-is
+    /// (same underlying image, new identity).
+    private static func padded(_ source: [Photo], to minimumCount: Int) -> [Photo] {
+        guard source.count < minimumCount, !source.isEmpty else { return source }
+        var result = source
+        var index = 0
+        while result.count < minimumCount {
+            let original = source[index % source.count]
+            result.append(Photo(id: UUID(), originalURL: original.originalURL, downsampledURL: original.downsampledURL, thumbnail: original.thumbnail, captureDate: original.captureDate))
+            index += 1
+        }
+        return result
+    }
+
+    /// Companion to `padded(_:to:)` above -- builds matching PhotoScore
+    /// clones (new id, same metrics) for whatever new Photo entries that
+    /// call appended, so every padded photo has a score to be shortlisted
+    /// with. `photos`/`originalPhotos` must be in the same relative
+    /// cycling order `padded(_:to:)` itself produced.
+    private static func padded(_ originalScores: [PhotoScore], photos: [Photo], from originalPhotos: [Photo]) -> [PhotoScore] {
+        guard photos.count > originalPhotos.count, !originalPhotos.isEmpty else { return originalScores }
+        let scoreByOriginalID = Dictionary(uniqueKeysWithValues: zip(originalPhotos.map(\.id), originalScores))
+        var result = originalScores
+        for index in originalPhotos.count..<photos.count {
+            let sourceOriginal = originalPhotos[(index - originalPhotos.count) % originalPhotos.count]
+            guard let sourceScore = scoreByOriginalID[sourceOriginal.id] else { continue }
+            result.append(PhotoScore(
+                id: photos[index].id,
+                rawAestheticScore: sourceScore.rawAestheticScore,
+                isUtility: sourceScore.isUtility,
+                faceCount: sourceScore.faceCount,
+                bestFaceQuality: sourceScore.bestFaceQuality,
+                humanCount: sourceScore.humanCount,
+                classificationLabels: sourceScore.classificationLabels,
+                category: sourceScore.category,
+                featurePrint: nil,
+                rejectionReason: nil
+            ))
+        }
+        return result
     }
 
     /// editFlow/finalReview keep their EXACT prior hardcoded value
@@ -247,7 +343,7 @@ struct DebugLaunchRootView: View {
     /// still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
-        case .editFlow, .advancedSheet, .finalReview, .caption: return "golden_hour"
+        case .editFlow, .advancedSheet, .finalReview, .caption, .curationSequence: return "golden_hour"
         case .packPreview: return DebugLaunch.packName
         case .vibeSelect, .welcome: return "golden_hour"
         }
@@ -295,9 +391,18 @@ struct DebugLaunchRootView: View {
                     FinalReviewView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
                         showCaption = true
                     }
-                } else {
+                } else if vibeSelectCurationComplete {
                     EditFlowView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
                         showFinalReview = true
+                    }
+                } else {
+                    // PHASE 9/10 CURATION INSERTION POINT, closed: used to
+                    // hand off directly to the on-device fallback path and
+                    // jump straight to EditFlowView -- CurationSequenceView
+                    // now owns that pipeline call, same as ImportView's own
+                    // two "use this vibe" call sites.
+                    CurationSequenceView(sessionStore: sessionStore, pack: vibeSelectResult.pack, count: vibeSelectResult.count) {
+                        vibeSelectCurationComplete = true
                     }
                 }
             } else {
@@ -306,18 +411,7 @@ struct DebugLaunchRootView: View {
                     samplePhotos: { pack in SampleAssets.packPreviewPhotos(for: pack.id) },
                     packThumbnail: { pack in SampleAssets.packThumbnail(for: pack.id) },
                     onVibeSelected: { pack, count in
-                        // PHASE 9/10 CURATION INSERTION POINT: prd.md §4
-                        // steps 5-6 ("curation progress" / "curation
-                        // showcase") aren't built this session -- hands off
-                        // directly to the existing on-device fallback path
-                        // instead, same as every other debug entry point in
-                        // this file (loadFixtureIntoSessionStore in
-                        // ImportView, this file's own .task below).
-                        let recomputed = ShortlistService.buildShortlist(from: sessionStore.scores)
-                        sessionStore.setShortlist(recomputed)
-                        let chosen = FallbackSelectionService.select(from: recomputed, count: count)
-                        sessionStore.setChosenSelection(chosen)
-                        sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: recomputed, chosen: chosen.selected))
+                        vibeSelectCurationComplete = false
                         vibeSelectResult = (pack, count)
                     }
                 )
