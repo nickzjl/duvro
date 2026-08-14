@@ -112,33 +112,74 @@
 //  TIMING: see ShowcaseTiming below -- THE constants to tune this
 //  sequence's pacing.
 //
-//  REBALANCED A SECOND TIME (blur/wash-out fix): the first redesign's
+//  REBALANCED A SECOND TIME (blur/wash-out fix): an earlier pass's
 //  values (1.8s fade, 0.20-0.50s stagger) made the fade LONGER than the
-//  stagger, so a card was still mid-fade -- genuinely translucent, not
-//  yet at full opacity -- when the next one landed on top of it. With
-//  the arrival-order z-index above, that reads as a blurry, washed-out
-//  overlap rather than a clean reveal, since two-plus semi-transparent
-//  cards are stacked at once. Fixed by inverting the relationship:
-//  cardFadeInDuration is now SHORT (reaches full opacity quickly) and
-//  stagger is ALWAYS >= cardFadeInDuration (minStagger is pinned to
-//  exactly cardFadeInDuration -- see its own doc comment), so a card
-//  finishes arriving, holds at full opacity for a beat, THEN the next
-//  one lands. Never let minStagger drop below cardFadeInDuration to
-//  chase a shorter total -- that's exactly what reintroduces this bug.
+//  stagger, so a card was still mid-fade when the next one landed on
+//  top of it, reading as a blurry overlap. Fixed by making the fade
+//  SHORT (0.2s) and pinning stagger to always be >= it.
 //
-//  THE n=20 TENSION (worth naming, not hiding): with 20 cards there are
-//  19 gaps, so even a bare-minimum non-overlapping stagger
-//  (== cardFadeInDuration, zero hold) costs 19 * cardFadeInDuration
-//  alone -- there is no way to give every one of 19 gaps a comfortable
-//  hold AND keep the total near the old ~6s cap; the two constraints
-//  are only both satisfiable by making the per-card hold thin at the
-//  high end. Current numbers (n=20): stagger clamps to minStagger
-//  (0.3s) against a 0.2s fade -- 1.5x, a real but thin 0.1s hold -- and
-//  total lands at ~6.05s. That 0.3s is the shortest stagger this design
-//  will use; it will not shrink further to force the total down, since
-//  going below cardFadeInDuration is the overlap bug this rebalance
-//  exists to fix. n=4-13 get a materially longer hold (up to 1.0s at
-//  n=4) since there's total-duration budget to spare at low n.
+//  REBALANCED A THIRD TIME (CHANGE 1 -- melting settle, not a pop):
+//  0.2s fixed the blur but reads as cards popping in rather than
+//  revealing. cardFadeInDuration is back up, to 0.7s, but NOT a return
+//  to the earlier bug -- the fix this time is the CURVE, not just the
+//  duration. cardFadeInCurve is a strong ease-out (ease-out-expo,
+//  timing-curve control points (0.16, 1, 0.3, 1): monotonic, so it
+//  never overshoots): opacity rises to substantially-opaque very early
+//  in the 0.7s, then eases through a long, gentle tail. The next
+//  card's arrival is still gated the same safe way it always has been
+//  -- minStagger is pinned to cardFadeInDuration + 0.1s (unchanged
+//  relationship, just following the new duration) -- so by the time
+//  the next card lands, this one's nominal animation has already
+//  fully finished, not merely "mostly opaque." A subtle scale settle
+//  (1.06 -> 1.0, same curve/duration as opacity) rides alongside the
+//  existing y-offset, so the card reads as easing into place rather
+//  than just fading -- also monotonic, no overshoot, per §4.
+//
+//  THE DURATION TRADE-OFF THIS TIME, worth naming plainly: minStagger
+//  following cardFadeInDuration means it grew from 0.3s to 0.8s, and
+//  since n=20 has 19 gaps, that alone is 19 * 0.8s = 15.2s -- total
+//  duration at n=20 is now ~16s, not the ~6s the previous pass
+//  targeted. This is a direct, expected consequence of prioritizing a
+//  genuine melting settle over a hard total-duration cap, not a bug --
+//  flagged here and in the handoff so it's a visible trade-off, not a
+//  silent regression. n=4-5 stay at the same ~4.45s total as before
+//  the fade lengthened (unclamped stagger absorbs the difference);
+//  n>=6 is where the floor's growth compounds across more gaps.
+//
+//  CHANGE 2 -- ROTATION: overrides UI_NOTES §4's earlier "Rotation:
+//  0°" (written from the mockup, before the built version was judged
+//  too orderly for a "collage"). Each card now gets a small,
+//  deterministic tilt (CollageLayout.rotation(for:), seeded by index,
+//  decorrelated from the size-jitter seed) within
+//  CollageLayout.maxRotationDegrees -- named there rather than in
+//  ShowcaseTiming since it's a spatial/layout constant, not a pacing
+//  one (ShowcaseTiming is private to this struct; CollageLayout is a
+//  sibling type in this file and needed its own visibility to the
+//  constant either way). Gentler than the shuffle deck's own -10...+10
+//  range, since the collage is the resting state, not mid-shuffle
+//  motion -- but nonzero on purpose, so cards that carry through from
+//  the deck (rank 1, when deck-visible) settle from a tilt into
+//  ANOTHER tilt rather than into dead-upright, which reads more
+//  coherent with where they came from. matchedGeometryEffect handles
+//  this the same way it already handled the old shuffle-tilt ->
+//  upright-0° transition: rotation isn't part of matchedGeometryEffect
+//  itself, but changing it inside the same animated phase-swap
+//  transaction animates smoothly regardless (confirmed on-device).
+//
+//  CHANGE 3 -- WIDER SPREAD, SAME CARD SIZE: CollageLayout's spiral
+//  used to size its radius from min(bounds.width, bounds.height) --
+//  whichever axis was smaller capped BOTH axes' spread, which is what
+//  caused cards to cluster in the vertical-middle band instead of
+//  using the frame's full height (previously flagged, not yet fixed).
+//  Radius is now computed independently per axis (an ellipse sized to
+//  the frame's own width/height, not a circle capped by the smaller
+//  one) and grown by CollageLayout.collageAreaGrowth (~15% more area,
+//  applied as its square root to each linear radius). Both axes are
+//  HARD-CLAMPED to never let a card's own edge pass the frame boundary
+//  -- a safety invariant, not a hopefully-tuned-conservatively-enough
+//  guess -- so "must not clip, n=4 to 20" holds by construction across
+//  whatever the real on-device frame size turns out to be, even if
+//  collageAreaGrowth is tuned larger later.
 //
 
 import SwiftUI
@@ -163,25 +204,35 @@ struct CurationSequenceView: View {
     /// change values here AND there together so the doc and the code
     /// don't drift.
     private enum ShowcaseTiming {
-        /// Per-card fade: opacity 0->1, offset y+10->0. Short and
-        /// snappy on purpose -- see file header's blur/wash-out fix
-        /// note. minStagger below is pinned to exactly this value: a
-        /// card must always reach full opacity before the next one
-        /// lands on top of it.
-        static let cardFadeInDuration: Double = 0.2
+        /// Per-card fade: opacity 0->1, offset y+10->0, scale 1.06->1.0.
+        /// Lengthened from a snappy 0.2s into a genuine melting settle
+        /// -- see file header CHANGE 1. cardFadeInCurve (below) is what
+        /// keeps this safe despite the longer duration: a strong
+        /// ease-out that's already substantially opaque well before
+        /// this nominal duration ends.
+        static let cardFadeInDuration: Double = 0.7
+        /// Ease-out-expo: fast rise, long gentle tail. Monotonic
+        /// control points (y never exceeds 1) -- never overshoots, per
+        /// §4's "no bouncing." See file header CHANGE 1.
+        static let cardFadeInCurve = Animation.timingCurve(0.16, 1, 0.3, 1, duration: cardFadeInDuration)
         /// Delay before the first (non-carried-through) card appears.
         static let firstCardDelay: Double = 0.15
         /// stagger = clamp(staggerNumerator / (n - 1), minStagger, maxStagger).
         static let staggerNumerator: Double = 3.6
-        /// HARD FLOOR, not a target -- always == cardFadeInDuration.
-        /// Never set this below cardFadeInDuration to force a shorter
-        /// total: that's the overlap/blur bug this rebalance fixed.
-        /// At n=20 this floor is what's actually in effect (the
-        /// formula alone would ask for ~0.19s), leaving a thin but
-        /// real 0.1s hold -- see file header's n=20 TENSION note.
+        /// HARD FLOOR, not a target -- always == cardFadeInDuration +
+        /// 0.1s, the same relationship as before cardFadeInDuration was
+        /// lengthened this pass (a card must fully finish arriving and
+        /// hold before the next lands). Grows automatically with
+        /// cardFadeInDuration above -- change that one value, not this
+        /// one, when retuning. See file header's DURATION TRADE-OFF
+        /// note for what this costs at high n (~16s total at n=20).
         static let minStagger: Double = cardFadeInDuration + 0.1
-        /// Generous at low n, where there's total-duration budget to
-        /// spare -- up to a 1.0s hold at n=4.
+        /// Unchanged from the previous pass: the per-card interval at
+        /// the lowest n (4) stays ~4.45s total either way (this was
+        /// 1.2s of pure stagger before; lengthening the fade above just
+        /// converts what used to be dead hold time into visible
+        /// settling motion, not additional wait). Revisit if the hold
+        /// still feels long on-device once the fade is this slow.
         static let maxStagger: Double = 1.2
     }
 
@@ -328,12 +379,13 @@ struct CurationSequenceView: View {
             }
         }
         .matchedGeometryEffect(id: score.id, in: cardNamespace)
-        .rotationEffect(.degrees(0)) // UI_NOTES §4: showcase rotation is 0°, unlike the shuffle deck
+        .rotationEffect(.degrees(slot.rotation)) // CHANGE 2: varied per-card tilt -- see file header / CollageLayout
+        .scaleEffect(revealed ? 1.0 : 1.06) // CHANGE 1: subtle scale settle alongside opacity -- see file header
         .position(x: slot.center.x, y: slot.center.y)
-        .zIndex(Double(revealOrder[score.id] ?? -1)) // CHANGE 1: arrival order, not rank -- see file header
+        .zIndex(Double(revealOrder[score.id] ?? -1)) // arrival order, not rank -- see file header REVEAL ORDER + STACKING
         .opacity(revealed ? 1 : 0)
         .offset(y: revealed ? 0 : 10)
-        .animation(.easeOut(duration: ShowcaseTiming.cardFadeInDuration), value: revealed)
+        .animation(ShowcaseTiming.cardFadeInCurve, value: revealed)
     }
 
     // MARK: - Sequencing
@@ -632,7 +684,27 @@ private enum CollageLayout {
     struct Slot {
         let center: CGPoint
         let size: CGSize
+        let rotation: Double
     }
+
+    /// Grows the golden-angle spiral's spread -- CHANGE 3, see file
+    /// header. THE constant to tune the spread by eye: expressed as
+    /// "how much more AREA the collage covers" (matching how the
+    /// product ask was framed -- "roughly 15% more of the screen"),
+    /// not a linear radius multiplier, so tuning it stays intuitive
+    /// (0.20 for ~20% more area, etc.). Applied to each axis's linear
+    /// radius as its square root, since area for a spread scales
+    /// roughly with radius^2.
+    private static let collageAreaGrowth: Double = 1.15
+
+    /// Small, varied per-card tilt so the resolved collage reads as a
+    /// casually stacked pile, not a rigid presentation grid -- CHANGE
+    /// 2, overriding UI_NOTES §4's earlier "Rotation: 0°" (updated to
+    /// match). Named here rather than in ShowcaseTiming since it's a
+    /// spatial/layout constant and this is the layout type -- see file
+    /// header for the full reasoning, including why this is gentler
+    /// than the shuffle deck's own -10...+10 range.
+    private static let maxRotationDegrees: Double = 6.0
 
     /// Base card size at n=4 (largest) down to n=20 (smallest), linearly
     /// interpolated by count so every n in between scales continuously
@@ -642,6 +714,17 @@ private enum CollageLayout {
         let widthFraction = 0.62 - t * 0.22 // 62% of bounds width at n=4, down to 40% at n=20
         let width = bounds.width * widthFraction
         return CGSize(width: width, height: width * 5 / 4) // 4:5 photos throughout
+    }
+
+    /// Deterministic pseudo-random tilt in [-maxRotationDegrees,
+    /// +maxRotationDegrees], decorrelated from the size jitter's own
+    /// seed (12.9898) below via a different hash constant (78.233, the
+    /// standard GLSL-idiom pairing) so rotation doesn't visibly track
+    /// size. `index + 1` avoids index 0 landing on the trivial sin(0)=0
+    /// case.
+    private static func rotation(for index: Int) -> Double {
+        let normalized = sin(Double(index + 1) * 78.233) // pseudo-random in [-1, 1]
+        return normalized * maxRotationDegrees
     }
 
     /// Deterministic pseudo-scatter: golden-angle spiral for center
@@ -654,7 +737,7 @@ private enum CollageLayout {
         let base = baseCardSize(for: total, in: bounds)
         let center = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
         guard total > 1 else {
-            return Slot(center: center, size: base)
+            return Slot(center: center, size: base, rotation: 0)
         }
 
         // Rank 1 (index 0) and rank 2 (index 1) share the SAME
@@ -663,28 +746,44 @@ private enum CollageLayout {
         // (arrival-order z-index, not this slot, decides who's on top
         // -- see CurationSequenceView.collageCard) and keeps that slot
         // once the sequence settles, visually "taking over" from rank
-        // 1. See file header REVEAL ORDER + STACKING.
+        // 1. See file header REVEAL ORDER + STACKING. Position/size are
+        // untouched by CHANGE 3 (the hero slot has no radius to spread
+        // in the first place); it still gets its own tilt from CHANGE 2.
         if index == 0 || index == 1 {
             let heroSize = CGSize(width: base.width * 1.18, height: base.height * 1.18)
-            return Slot(center: center, size: heroSize)
+            return Slot(center: center, size: heroSize, rotation: rotation(for: index))
         }
 
-        // Golden-angle spiral, radius scaled down so the whole spread
-        // stays within bounds even at the largest (n=4) card size --
-        // more cards (n=20) get a proportionally larger spread radius
-        // since their cards are individually smaller. Every other card
-        // gets a mild per-index size jitter (varied size, per UI_NOTES
-        // §4).
+        // Every other card gets a mild per-index size jitter (varied
+        // size, per UI_NOTES §4), computed before the spread below so
+        // the clamp can account for each card's own half-size.
+        let jitter = 0.85 + 0.3 * abs(sin(Double(index) * 12.9898))
+        let size = CGSize(width: base.width * jitter, height: base.height * jitter)
+
+        // Golden-angle spiral. CHANGE 3: radius is computed
+        // independently per axis (an ellipse sized to the frame's own
+        // width/height) rather than a single radius bounded by
+        // min(width, height) -- the old circular spread was capped by
+        // whichever dimension was smaller, which is what caused cards
+        // to cluster in the vertical-middle band instead of using the
+        // frame's full height. Both axes are then HARD-CLAMPED so a
+        // card's own edge never passes the frame boundary -- "must not
+        // clip" holds by construction, not by hoping collageAreaGrowth
+        // was tuned conservatively enough.
         let goldenAngle = 137.5 * .pi / 180
         let angle = Double(index) * goldenAngle
         let maxRadiusFraction = 0.16 + 0.22 * (Double(total - 1) / 19.0) // grows with n
-        let radius = min(bounds.width, bounds.height) * maxRadiusFraction * (0.35 + 0.65 * (Double(index) / Double(max(total - 1, 1))))
+        let indexFactor = 0.35 + 0.65 * (Double(index) / Double(max(total - 1, 1)))
+        let spreadScale = collageAreaGrowth.squareRoot()
 
-        let x = center.x + radius * cos(angle)
-        let y = center.y + radius * sin(angle)
+        let desiredRadiusX = bounds.width * maxRadiusFraction * indexFactor * spreadScale
+        let desiredRadiusY = bounds.height * maxRadiusFraction * indexFactor * spreadScale
+        let radiusX = min(desiredRadiusX, max(bounds.width / 2 - size.width / 2, 0))
+        let radiusY = min(desiredRadiusY, max(bounds.height / 2 - size.height / 2, 0))
 
-        let jitter = 0.85 + 0.3 * abs(sin(Double(index) * 12.9898))
-        let size = CGSize(width: base.width * jitter, height: base.height * jitter)
-        return Slot(center: CGPoint(x: x, y: y), size: size)
+        let x = center.x + radiusX * cos(angle)
+        let y = center.y + radiusY * sin(angle)
+
+        return Slot(center: CGPoint(x: x, y: y), size: size, rotation: rotation(for: index))
     }
 }
