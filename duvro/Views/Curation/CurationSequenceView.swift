@@ -110,15 +110,35 @@
 //  0->1, offset y+10->0) at ShowcaseTiming's pacing.
 //
 //  TIMING: see ShowcaseTiming below -- THE constants to tune this
-//  sequence's pacing. Deliberately slower and longer than the
-//  mockup-derived values UI_NOTES §4 used to specify (1.2s/card, a
-//  0.10-0.28s stagger clamp), which were extracted from a mockup, not
-//  tested against this design, and read as rushed once the bookend
-//  reveal order was in place. The stagger formula still scales with n
-//  (per-card delay shrinks as photo count grows) and is clamped so a
-//  20-photo post doesn't drag: total holds at exactly
-//  ShowcaseTiming.firstCardDelay + staggerNumerator + cardFadeInDuration
-//  (~6.0s) from n=9 upward rather than growing unbounded with n.
+//  sequence's pacing.
+//
+//  REBALANCED A SECOND TIME (blur/wash-out fix): the first redesign's
+//  values (1.8s fade, 0.20-0.50s stagger) made the fade LONGER than the
+//  stagger, so a card was still mid-fade -- genuinely translucent, not
+//  yet at full opacity -- when the next one landed on top of it. With
+//  the arrival-order z-index above, that reads as a blurry, washed-out
+//  overlap rather than a clean reveal, since two-plus semi-transparent
+//  cards are stacked at once. Fixed by inverting the relationship:
+//  cardFadeInDuration is now SHORT (reaches full opacity quickly) and
+//  stagger is ALWAYS >= cardFadeInDuration (minStagger is pinned to
+//  exactly cardFadeInDuration -- see its own doc comment), so a card
+//  finishes arriving, holds at full opacity for a beat, THEN the next
+//  one lands. Never let minStagger drop below cardFadeInDuration to
+//  chase a shorter total -- that's exactly what reintroduces this bug.
+//
+//  THE n=20 TENSION (worth naming, not hiding): with 20 cards there are
+//  19 gaps, so even a bare-minimum non-overlapping stagger
+//  (== cardFadeInDuration, zero hold) costs 19 * cardFadeInDuration
+//  alone -- there is no way to give every one of 19 gaps a comfortable
+//  hold AND keep the total near the old ~6s cap; the two constraints
+//  are only both satisfiable by making the per-card hold thin at the
+//  high end. Current numbers (n=20): stagger clamps to minStagger
+//  (0.3s) against a 0.2s fade -- 1.5x, a real but thin 0.1s hold -- and
+//  total lands at ~6.05s. That 0.3s is the shortest stagger this design
+//  will use; it will not shrink further to force the total down, since
+//  going below cardFadeInDuration is the overlap bug this rebalance
+//  exists to fix. n=4-13 get a materially longer hold (up to 1.0s at
+//  n=4) since there's total-duration budget to spare at low n.
 //
 
 import SwiftUI
@@ -143,14 +163,26 @@ struct CurationSequenceView: View {
     /// change values here AND there together so the doc and the code
     /// don't drift.
     private enum ShowcaseTiming {
-        /// Per-card fade: opacity 0->1, offset y+10->0.
-        static let cardFadeInDuration: Double = 1.8
+        /// Per-card fade: opacity 0->1, offset y+10->0. Short and
+        /// snappy on purpose -- see file header's blur/wash-out fix
+        /// note. minStagger below is pinned to exactly this value: a
+        /// card must always reach full opacity before the next one
+        /// lands on top of it.
+        static let cardFadeInDuration: Double = 0.2
         /// Delay before the first (non-carried-through) card appears.
-        static let firstCardDelay: Double = 0.2
+        static let firstCardDelay: Double = 0.15
         /// stagger = clamp(staggerNumerator / (n - 1), minStagger, maxStagger).
-        static let staggerNumerator: Double = 4.0
-        static let minStagger: Double = 0.20
-        static let maxStagger: Double = 0.50
+        static let staggerNumerator: Double = 3.6
+        /// HARD FLOOR, not a target -- always == cardFadeInDuration.
+        /// Never set this below cardFadeInDuration to force a shorter
+        /// total: that's the overlap/blur bug this rebalance fixed.
+        /// At n=20 this floor is what's actually in effect (the
+        /// formula alone would ask for ~0.19s), leaving a thin but
+        /// real 0.1s hold -- see file header's n=20 TENSION note.
+        static let minStagger: Double = cardFadeInDuration + 0.1
+        /// Generous at low n, where there's total-duration budget to
+        /// spare -- up to a 1.0s hold at n=4.
+        static let maxStagger: Double = 1.2
     }
 
     private enum Phase {
