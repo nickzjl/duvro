@@ -105,48 +105,63 @@
 //  reveal order anyway, an instant start doesn't conflict with the
 //  ordering guarantee above. No other card gets this treatment,
 //  including rank 2: letting a middle-order card or rank 2 appear
-//  early would break "rank 1 first, rank 2 last." Every card that
-//  doesn't get this treatment runs the normal per-card reveal (opacity
-//  0->1, offset y+10->0) at ShowcaseTiming's pacing.
+//  early would break "rank 1 first, rank 2 last." Every other card
+//  reveals as part of a BATCH (see below), at ShowcaseTiming's pacing.
 //
 //  TIMING: see ShowcaseTiming below -- THE constants to tune this
-//  sequence's pacing.
+//  sequence's pacing. Retuned three times so far; history matters here
+//  since two of the three fixes address problems that look superficially
+//  similar (both are "the collage doesn't read right") but have opposite
+//  causes and opposite fixes -- don't reach for the wrong lever:
 //
-//  REBALANCED A SECOND TIME (blur/wash-out fix): an earlier pass's
-//  values (1.8s fade, 0.20-0.50s stagger) made the fade LONGER than the
-//  stagger, so a card was still mid-fade when the next one landed on
-//  top of it, reading as a blurry overlap. Fixed by making the fade
-//  SHORT (0.2s) and pinning stagger to always be >= it.
+//  PASS 2 (blur/wash-out): an earlier version's values (1.8s fade,
+//  0.20-0.50s stagger) made the fade LONGER than the stagger, so a card
+//  was still mid-fade when the next one landed on top of it -- multiple
+//  translucent cards stacked at once reads as blurry. Fixed by making
+//  the fade SHORT (0.2s) and pinning stagger to always be >= it.
 //
-//  REBALANCED A THIRD TIME (CHANGE 1 -- melting settle, not a pop):
-//  0.2s fixed the blur but reads as cards popping in rather than
-//  revealing. cardFadeInDuration is back up, to 0.7s, but NOT a return
-//  to the earlier bug -- the fix this time is the CURVE, not just the
-//  duration. cardFadeInCurve is a strong ease-out (ease-out-expo,
-//  timing-curve control points (0.16, 1, 0.3, 1): monotonic, so it
-//  never overshoots): opacity rises to substantially-opaque very early
-//  in the 0.7s, then eases through a long, gentle tail. The next
-//  card's arrival is still gated the same safe way it always has been
-//  -- minStagger is pinned to cardFadeInDuration + 0.1s (unchanged
-//  relationship, just following the new duration) -- so by the time
-//  the next card lands, this one's nominal animation has already
-//  fully finished, not merely "mostly opaque." A subtle scale settle
-//  (1.06 -> 1.0, same curve/duration as opacity) rides alongside the
-//  existing y-offset, so the card reads as easing into place rather
-//  than just fading -- also monotonic, no overshoot, per §4.
+//  PASS 3 (0.2s reads as popping in, not revealing): fixed by lengthening
+//  the fade back up, but that alone would just reintroduce PASS 2's bug
+//  -- see PASS 4 below for why duration wasn't actually the right lever
+//  either.
 //
-//  THE DURATION TRADE-OFF THIS TIME, worth naming plainly: minStagger
-//  following cardFadeInDuration means it grew from 0.3s to 0.8s, and
-//  since n=20 has 19 gaps, that alone is 19 * 0.8s = 15.2s -- total
-//  duration at n=20 is now ~16s, not the ~6s the previous pass
-//  targeted. This is a direct, expected consequence of prioritizing a
-//  genuine melting settle over a hard total-duration cap, not a bug --
-//  flagged here and in the handoff so it's a visible trade-off, not a
-//  silent regression. n=4-5 stay at the same ~4.45s total as before
-//  the fade lengthened (unclamped stagger absorbs the difference);
-//  n>=6 is where the floor's growth compounds across more gaps.
+//  PASS 4 (CURVE FIX, this session -- the duration in PASS 3 was never
+//  the problem): cardFadeInDuration went back up to 0.7s in PASS 3, but
+//  the curve at the time (ease-out-expo, control points (0.16, 1, 0.3,
+//  1)) dumps ~90% of the opacity change into the first ~15% of ANY
+//  duration it's given -- so a nominal 0.7s fade was only ever
+//  perceptible for about 0.1-0.15s, no matter how long the duration was
+//  set to. Lengthening duration further would not have fixed this (and
+//  would have reintroduced something close to PASS 2's overlap problem
+//  via a growing minStagger). The actual fix is cardFadeInCurve itself:
+//  replaced with ease-out-sine (0.39, 0.575, 0.565, 1), the gentlest of
+//  the standard ease-out curves -- close to linear, opacity climbs
+//  steadily across the FULL nominal duration rather than front-loading
+//  almost all of it. cardFadeInDuration is unchanged at 0.7s from PASS
+//  3; only the curve changed. A subtle scale settle (1.06 -> 1.0) rides
+//  the same curve/duration as opacity, so the card reads as easing into
+//  place rather than just fading -- monotonic, no overshoot, per §4.
 //
-//  CHANGE 2 -- ROTATION: overrides UI_NOTES §4's earlier "Rotation:
+//  BATCHED REVEAL (this session, alongside the curve fix): cards used to
+//  reveal strictly one at a time (bookend order, each on its own
+//  stagger). Now: rank 1 opens ALONE, rank 2 closes ALONE (unchanged --
+//  see REVEAL ORDER + STACKING above), and everything in between reveals
+//  in BATCHES of 2-3 (more at high n -- see ShowcaseTiming), members
+//  offset by ShowcaseTiming.intraBatchOffset (a few tens of ms, not
+//  simultaneous) and positioned to overlap each other's corners/edges
+//  (CollageLayout's batch-anchored jitter, below) -- the deliberate
+//  messiness a collage needs. This is also what fixes the n=20 duration
+//  problem PASS 3 introduced: with 20 cards as ~7-9 arrival EVENTS
+//  instead of 20, and a shorter ShowcaseTiming.batchGap between events
+//  (affordable now that the fade is actually visible instead of
+//  invisible-until-suddenly-there), total duration drops from PASS 3's
+//  ~16s back down to a few seconds -- without shrinking any single
+//  card's own fade back below what's genuinely watchable. Batch sizes
+//  growing at high n (not just a shrinking gap) is the main lever: a
+//  tighter overlap within a bigger batch at n=20 is an accepted
+//  trade-off; a 16-second collage was not.
+//
+//  ROTATION: overrides UI_NOTES §4's earlier "Rotation:
 //  0°" (written from the mockup, before the built version was judged
 //  too orderly for a "collage"). Each card now gets a small,
 //  deterministic tilt (CollageLayout.rotation(for:), seeded by index,
@@ -166,7 +181,7 @@
 //  itself, but changing it inside the same animated phase-swap
 //  transaction animates smoothly regardless (confirmed on-device).
 //
-//  CHANGE 3 -- WIDER SPREAD, SAME CARD SIZE: CollageLayout's spiral
+//  WIDER SPREAD, SAME CARD SIZE: CollageLayout's spiral
 //  used to size its radius from min(bounds.width, bounds.height) --
 //  whichever axis was smaller capped BOTH axes' spread, which is what
 //  caused cards to cluster in the vertical-middle band instead of
@@ -205,35 +220,45 @@ struct CurationSequenceView: View {
     /// don't drift.
     private enum ShowcaseTiming {
         /// Per-card fade: opacity 0->1, offset y+10->0, scale 1.06->1.0.
-        /// Lengthened from a snappy 0.2s into a genuine melting settle
-        /// -- see file header CHANGE 1. cardFadeInCurve (below) is what
-        /// keeps this safe despite the longer duration: a strong
-        /// ease-out that's already substantially opaque well before
-        /// this nominal duration ends.
+        /// Unchanged in DURATION from the previous pass -- what changed
+        /// is cardFadeInCurve below, which is what actually controls
+        /// how much of this duration is perceptible. See file header
+        /// CHANGE 1 (CURVE FIX).
         static let cardFadeInDuration: Double = 0.7
-        /// Ease-out-expo: fast rise, long gentle tail. Monotonic
-        /// control points (y never exceeds 1) -- never overshoots, per
-        /// §4's "no bouncing." See file header CHANGE 1.
-        static let cardFadeInCurve = Animation.timingCurve(0.16, 1, 0.3, 1, duration: cardFadeInDuration)
-        /// Delay before the first (non-carried-through) card appears.
+        /// Gentle ease-out (ease-out-sine, timing-curve control points
+        /// (0.39, 0.575, 0.565, 1) -- the mildest of the standard
+        /// ease-out family, close to linear with only a slight
+        /// deceleration at the very end). Monotonic, never overshoots.
+        /// REPLACES ease-out-expo (0.16, 1, 0.3, 1): that curve dumped
+        /// ~90% of the opacity change into the first ~15% of the
+        /// duration, so a nominal 0.7s fade read as ~0.1-0.15s -- the
+        /// duration number was correct, the curve made almost none of
+        /// it visible. This curve spreads the climb across the full
+        /// duration instead. See file header CHANGE 1.
+        static let cardFadeInCurve = Animation.timingCurve(0.39, 0.575, 0.565, 1, duration: cardFadeInDuration)
+        /// Delay before the first (non-carried-through) reveal.
         static let firstCardDelay: Double = 0.15
-        /// stagger = clamp(staggerNumerator / (n - 1), minStagger, maxStagger).
-        static let staggerNumerator: Double = 3.6
-        /// HARD FLOOR, not a target -- always == cardFadeInDuration +
-        /// 0.1s, the same relationship as before cardFadeInDuration was
-        /// lengthened this pass (a card must fully finish arriving and
-        /// hold before the next lands). Grows automatically with
-        /// cardFadeInDuration above -- change that one value, not this
-        /// one, when retuning. See file header's DURATION TRADE-OFF
-        /// note for what this costs at high n (~16s total at n=20).
-        static let minStagger: Double = cardFadeInDuration + 0.1
-        /// Unchanged from the previous pass: the per-card interval at
-        /// the lowest n (4) stays ~4.45s total either way (this was
-        /// 1.2s of pure stagger before; lengthening the fade above just
-        /// converts what used to be dead hold time into visible
-        /// settling motion, not additional wait). Revisit if the hold
-        /// still feels long on-device once the fade is this slow.
-        static let maxStagger: Double = 1.2
+        /// "A few tens of milliseconds" offset between members of the
+        /// same batch, so they don't land in the exact same instant --
+        /// see file header CHANGE 2 (BATCHED REVEAL).
+        static let intraBatchOffset: Double = 0.05
+        /// Pause between one batch finishing and the next batch's first
+        /// member landing. Shorter than the old per-card stagger
+        /// (0.8-1.2s) on purpose -- with a real, visible fade (the
+        /// curve fix above), the sequence can afford to feel more
+        /// continuous. See file header CHANGE 2.
+        static let batchGap: Double = 0.6
+        /// Batch size range scales with n -- 2-3 at n=4, growing to 3-5
+        /// by n=20 -- so a large post needs FEWER arrival events, not
+        /// just smaller stagger gaps between many small ones. This is
+        /// what brings n=20's total down from the ~16s the per-card
+        /// design produced to a few seconds, without shrinking
+        /// batchGap to something imperceptible. See file header CHANGE
+        /// 2's DURATION note.
+        static let minBatchSizeAtLowN: Int = 2
+        static let maxBatchSizeAtLowN: Int = 3
+        static let minBatchSizeAtHighN: Int = 3
+        static let maxBatchSizeAtHighN: Int = 5
     }
 
     private enum Phase {
@@ -347,7 +372,13 @@ struct CurationSequenceView: View {
 
     // MARK: - Collage phase
 
+    @ViewBuilder
     private var collagePhase: some View {
+        // Computed once per render rather than per-card -- revealBatches()
+        // is a pure function of finalSelection, but there's no reason to
+        // re-partition it n times when every card needs the same result.
+        // See CHANGE header BATCHED REVEAL.
+        let placements = Self.batchPlacements(from: revealBatches())
         VStack(spacing: 0) {
             Spacer(minLength: 24)
             Text("our favorites")
@@ -357,7 +388,7 @@ struct CurationSequenceView: View {
             GeometryReader { geo in
                 ZStack {
                     ForEach(Array(finalSelection.enumerated()), id: \.element.id) { index, score in
-                        let slot = CollageLayout.slot(index: index, total: finalSelection.count, in: geo.size)
+                        let slot = CollageLayout.slot(cardIndex: index, total: finalSelection.count, placement: placements[score.id], in: geo.size)
                         collageCard(score: score, slot: slot)
                     }
                 }
@@ -366,6 +397,28 @@ struct CurationSequenceView: View {
             .padding(.horizontal, 20)
             Spacer(minLength: 40)
         }
+    }
+
+    /// Maps each middle-order (non-hero) card id to its position within
+    /// the batch plan, for CollageLayout.slot to place it near its
+    /// batch-mates. Rank 1 and rank 2 (the two solo endpoint batches)
+    /// are absent from the result -- they always resolve to the hero
+    /// slot regardless, keyed by identity in CollageLayout, not by batch.
+    private static func batchPlacements(from batches: [RevealBatch]) -> [UUID: CollageLayout.BatchPlacement] {
+        guard batches.count > 2 else { return [:] }
+        let middleBatches = batches[1..<(batches.count - 1)]
+        var result: [UUID: CollageLayout.BatchPlacement] = [:]
+        for (batchIndex, batch) in middleBatches.enumerated() {
+            for (position, id) in batch.ids.enumerated() {
+                result[id] = CollageLayout.BatchPlacement(
+                    batchIndex: batchIndex,
+                    totalBatches: middleBatches.count,
+                    positionInBatch: position,
+                    batchSize: batch.ids.count
+                )
+            }
+        }
+        return result
     }
 
     private func collageCard(score: PhotoScore, slot: CollageLayout.Slot) -> some View {
@@ -511,76 +564,126 @@ struct CurationSequenceView: View {
         resolveIntoCollage()
     }
 
-    /// Builds the bookend reveal order (CHANGE 2 -- see file header):
-    /// rank 1 first, rank 2 last, everything else in between in
-    /// composite order. `n <= 2` degenerates naturally -- with no
-    /// "everything else," it's just [rank 1] or [rank 1, rank 2].
-    private func bookendOrder() -> [UUID] {
+    /// One reveal "wave" -- either a solo endpoint (rank 1 opening, rank
+    /// 2 closing) or a batch of 2+ middle-order cards that arrive
+    /// together. See file header BATCHED REVEAL.
+    struct RevealBatch {
+        let ids: [UUID]
+    }
+
+    /// Batch size range for a post of `n` photos -- linearly
+    /// interpolated between ShowcaseTiming's low-n and high-n endpoints,
+    /// same `t` normalization CollageLayout.baseCardSize already uses.
+    private func batchSizeRange(for n: Int) -> ClosedRange<Int> {
+        let t = Double(max(0, min(n, 20) - 4)) / 16.0
+        let lo = Int((Double(ShowcaseTiming.minBatchSizeAtLowN) + t * Double(ShowcaseTiming.minBatchSizeAtHighN - ShowcaseTiming.minBatchSizeAtLowN)).rounded())
+        let hi = Int((Double(ShowcaseTiming.maxBatchSizeAtLowN) + t * Double(ShowcaseTiming.maxBatchSizeAtHighN - ShowcaseTiming.maxBatchSizeAtLowN)).rounded())
+        return lo...max(lo, hi)
+    }
+
+    /// Builds the bookend + batched reveal plan (see file header BATCHED
+    /// REVEAL): rank 1 solo, then the middle-order cards (composite
+    /// order) split into batches of varied size within batchSizeRange,
+    /// then rank 2 solo. Batch sizes are picked deterministically (a
+    /// seeded pseudo-random hash, same idiom as CollageLayout's size/
+    /// rotation jitter) so the same selection always groups the same
+    /// way -- "varied," not literally random. `n <= 2` degenerates
+    /// naturally to solo-only batches -- no middle cards to group.
+    private func revealBatches() -> [RevealBatch] {
         let ids = finalSelection.map(\.id)
-        guard ids.count > 2 else { return ids }
-        return [ids[0]] + ids[2...] + [ids[1]]
+        guard ids.count > 2 else { return ids.map { RevealBatch(ids: [$0]) } }
+        let middle = Array(ids[2...])
+        let range = batchSizeRange(for: ids.count)
+        var batches: [RevealBatch] = [RevealBatch(ids: [ids[0]])]
+        var i = 0
+        var batchCounter = 0
+        while i < middle.count {
+            let remaining = middle.count - i
+            let seed = abs(sin(Double(batchCounter + 1) * 45.164)) // deterministic pseudo-random in [0, 1)
+            var size = range.lowerBound + Int(seed * Double(range.upperBound - range.lowerBound + 1))
+            size = min(size, range.upperBound)
+            if remaining - size == 1 { size = remaining } // absorb a lone straggler rather than leaving a solo middle batch
+            size = max(1, min(size, remaining))
+            batches.append(RevealBatch(ids: Array(middle[i..<(i + size)])))
+            i += size
+            batchCounter += 1
+        }
+        batches.append(RevealBatch(ids: [ids[1]]))
+        return batches
+    }
+
+    /// Total time from resolve to onComplete for a given batch plan --
+    /// mirrors revealBatchesSequentially's own timing exactly (see its
+    /// doc comment), computed upfront so it can be scheduled as one
+    /// sleep rather than awaiting the reveal loop itself. Always
+    /// computed against the FULL batch plan, regardless of whether rank
+    /// 1 carried through instantly -- same "always full n" convention
+    /// this file has used since the per-card design (see git history).
+    private func totalRevealDuration(for batches: [RevealBatch]) -> Double {
+        let intraBatchTime = batches.reduce(0.0) { $0 + Double(max($1.ids.count - 1, 0)) * ShowcaseTiming.intraBatchOffset }
+        let gapTime = Double(max(batches.count - 1, 0)) * ShowcaseTiming.batchGap
+        return ShowcaseTiming.firstCardDelay + intraBatchTime + gapTime + ShowcaseTiming.cardFadeInDuration
     }
 
     /// Resolves the shuffle deck into the collage and starts the
-    /// bookend reveal sequence -- see file header REVEAL ORDER +
-    /// STACKING. Rank 1 carries through via matchedGeometryEffect if
-    /// it's currently deck-visible (continuity); every other card,
-    /// including rank 2, always runs the normal staggered fade so the
-    /// "rank 1 first, rank 2 last" guarantee can't be short-circuited
-    /// by shuffle-deck timing coincidence.
+    /// batched reveal sequence -- see file header REVEAL ORDER +
+    /// STACKING and BATCHED REVEAL. Rank 1 carries through via
+    /// matchedGeometryEffect if it's currently deck-visible
+    /// (continuity); every other card, including rank 2, always runs
+    /// the normal batched reveal so the "rank 1 first, rank 2 last"
+    /// guarantee can't be short-circuited by shuffle-deck timing
+    /// coincidence.
     private func resolveIntoCollage() {
-        let orderedIDs = bookendOrder()
+        let batches = revealBatches()
         phase = .collage
 
-        guard !orderedIDs.isEmpty else {
+        guard !batches.isEmpty else {
             onComplete()
             return
         }
 
-        var toReveal = orderedIDs
-        if let rank1 = orderedIDs.first,
+        var remainingBatches = batches
+        if let firstBatch = batches.first, firstBatch.ids.count == 1,
+           let rank1 = firstBatch.ids.first,
            ShuffleDeck.visibleIDs(snapshot: shuffleSnapshot, tick: shuffleTick).contains(rank1) {
             revealedCardIDs = [rank1]
             revealOrder[rank1] = 0
-            toReveal.removeFirst()
+            remainingBatches.removeFirst()
         }
 
-        let n = finalSelection.count
-        guard n > 1 else {
-            // Guard n=1 separately (UI_NOTES §4): no stagger to compute,
-            // just the first card's own delay + animation.
-            revealSequentially(ids: toReveal, firstDelay: ShowcaseTiming.firstCardDelay, stagger: 0)
-            Task {
-                try? await Task.sleep(for: .seconds(ShowcaseTiming.firstCardDelay + ShowcaseTiming.cardFadeInDuration))
-                onComplete()
-            }
-            return
-        }
-        let stagger = min(max(ShowcaseTiming.staggerNumerator / Double(n - 1), ShowcaseTiming.minStagger), ShowcaseTiming.maxStagger)
-        revealSequentially(ids: toReveal, firstDelay: ShowcaseTiming.firstCardDelay, stagger: stagger)
+        revealBatchesSequentially(remainingBatches, firstDelay: ShowcaseTiming.firstCardDelay)
 
-        // Always computed against the full n (per UI_NOTES §4's
-        // formula), regardless of whether rank 1 carried through --
-        // matches this codebase's existing convention (see git
-        // history), so the doc's worked examples stay accurate no
-        // matter what the shuffle deck happened to be showing.
-        let total = ShowcaseTiming.firstCardDelay + Double(n - 1) * stagger + ShowcaseTiming.cardFadeInDuration
+        let total = totalRevealDuration(for: batches)
         Task {
             try? await Task.sleep(for: .seconds(total))
             onComplete()
         }
     }
 
-    private func revealSequentially(ids: [UUID], firstDelay: Double, stagger: Double) {
-        guard !ids.isEmpty else { return }
-        let startingOrder = revealOrder.count
+    /// Reveals each batch's members with a small intra-batch offset (not
+    /// simultaneous), then pauses batchGap before the next batch starts.
+    /// No trailing gap after the LAST batch -- resolveIntoCollage's own
+    /// total (via totalRevealDuration) accounts for the final card's
+    /// fade instead. See file header BATCHED REVEAL.
+    private func revealBatchesSequentially(_ batches: [RevealBatch], firstDelay: Double) {
+        guard !batches.isEmpty else { return }
+        var order = revealOrder.count
         Task {
             try? await Task.sleep(for: .seconds(firstDelay))
-            for (offset, id) in ids.enumerated() {
+            for (batchIndex, batch) in batches.enumerated() {
                 guard !Task.isCancelled else { return }
-                revealedCardIDs.insert(id)
-                revealOrder[id] = startingOrder + offset
-                try? await Task.sleep(for: .seconds(stagger))
+                for (memberIndex, id) in batch.ids.enumerated() {
+                    guard !Task.isCancelled else { return }
+                    if memberIndex > 0 {
+                        try? await Task.sleep(for: .seconds(ShowcaseTiming.intraBatchOffset))
+                    }
+                    revealedCardIDs.insert(id)
+                    revealOrder[id] = order
+                    order += 1
+                }
+                if batchIndex < batches.count - 1 {
+                    try? await Task.sleep(for: .seconds(ShowcaseTiming.batchGap))
+                }
             }
         }
     }
@@ -687,6 +790,16 @@ private enum CollageLayout {
         let rotation: Double
     }
 
+    /// Where a middle-order card sits within CurationSequenceView's
+    /// batch plan -- nil for rank 1/rank 2 (always the hero slot,
+    /// unaffected by batching). See file header BATCHED REVEAL.
+    struct BatchPlacement {
+        let batchIndex: Int
+        let totalBatches: Int
+        let positionInBatch: Int
+        let batchSize: Int
+    }
+
     /// Grows the golden-angle spiral's spread -- CHANGE 3, see file
     /// header. THE constant to tune the spread by eye: expressed as
     /// "how much more AREA the collage covers" (matching how the
@@ -705,6 +818,16 @@ private enum CollageLayout {
     /// header for the full reasoning, including why this is gentler
     /// than the shuffle deck's own -10...+10 range.
     private static let maxRotationDegrees: Double = 6.0
+
+    /// How far a batch-mate's center sits from its batch's shared
+    /// anchor point, as a fraction of ITS OWN size -- so members of the
+    /// same reveal batch visibly overlap each other's corners/edges,
+    /// the deliberate messiness a collage needs (see file header
+    /// BATCHED REVEAL). Expressed as a fraction of card size (not frame
+    /// size) so it scales naturally at every n, since card size already
+    /// does. ~0.28 puts two batch-mates' centers about 56% of a card-
+    /// width apart -- solid overlap without reading as a single blob.
+    private static let intraBatchJitterFraction: Double = 0.28
 
     /// Base card size at n=4 (largest) down to n=20 (smallest), linearly
     /// interpolated by count so every n in between scales continuously
@@ -727,13 +850,15 @@ private enum CollageLayout {
         return normalized * maxRotationDegrees
     }
 
-    /// Deterministic pseudo-scatter: golden-angle spiral for center
-    /// offsets (even, non-repeating coverage of the frame without a
-    /// literal grid) plus a small per-index size/z jitter so cards read
-    /// as varied, overlapping, hand-placed -- not uniform. Seeded only by
-    /// `index`/`total`, so the same selection always lays out the same
-    /// way (no visible reshuffling if this is ever recomputed).
-    static func slot(index: Int, total: Int, in bounds: CGSize) -> Slot {
+    /// `cardIndex` is the card's own position in finalSelection (drives
+    /// its SIZE and ROTATION -- unaffected by batching, so each card
+    /// keeps its own varied look regardless of who it arrives with).
+    /// `placement` is nil for rank 1/rank 2 (hero slot) and set for
+    /// every middle-order card (drives its POSITION, batch-anchored --
+    /// see file header BATCHED REVEAL). Seeded only by index/placement/
+    /// total, so the same selection always lays out the same way (no
+    /// visible reshuffling if this is ever recomputed).
+    static func slot(cardIndex: Int, total: Int, placement: BatchPlacement?, in bounds: CGSize) -> Slot {
         let base = baseCardSize(for: total, in: bounds)
         let center = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
         guard total > 1 else {
@@ -746,44 +871,61 @@ private enum CollageLayout {
         // (arrival-order z-index, not this slot, decides who's on top
         // -- see CurationSequenceView.collageCard) and keeps that slot
         // once the sequence settles, visually "taking over" from rank
-        // 1. See file header REVEAL ORDER + STACKING. Position/size are
-        // untouched by CHANGE 3 (the hero slot has no radius to spread
-        // in the first place); it still gets its own tilt from CHANGE 2.
-        if index == 0 || index == 1 {
+        // 1. See file header REVEAL ORDER + STACKING. Identity-keyed
+        // (placement == nil), not batch-keyed -- rank 1/2 are always
+        // solo reveal batches, so they'd never get a placement anyway.
+        guard let placement else {
             let heroSize = CGSize(width: base.width * 1.18, height: base.height * 1.18)
-            return Slot(center: center, size: heroSize, rotation: rotation(for: index))
+            return Slot(center: center, size: heroSize, rotation: rotation(for: cardIndex))
         }
 
-        // Every other card gets a mild per-index size jitter (varied
-        // size, per UI_NOTES §4), computed before the spread below so
-        // the clamp can account for each card's own half-size.
-        let jitter = 0.85 + 0.3 * abs(sin(Double(index) * 12.9898))
+        // Size/rotation still driven by the card's OWN composite index
+        // (varied size/tilt per UI_NOTES §4, independent of which batch
+        // it landed in) -- computed before the spread below so the
+        // clamp can account for each card's own half-size.
+        let jitter = 0.85 + 0.3 * abs(sin(Double(cardIndex) * 12.9898))
         let size = CGSize(width: base.width * jitter, height: base.height * jitter)
 
-        // Golden-angle spiral. CHANGE 3: radius is computed
-        // independently per axis (an ellipse sized to the frame's own
-        // width/height) rather than a single radius bounded by
-        // min(width, height) -- the old circular spread was capped by
-        // whichever dimension was smaller, which is what caused cards
-        // to cluster in the vertical-middle band instead of using the
-        // frame's full height. Both axes are then HARD-CLAMPED so a
-        // card's own edge never passes the frame boundary -- "must not
-        // clip" holds by construction, not by hoping collageAreaGrowth
-        // was tuned conservatively enough.
+        // BATCH ANCHOR: same golden-angle spiral as before, now keyed by
+        // BATCH index/total rather than per-card index/total -- batches,
+        // not individual cards, are what's evenly distributed around the
+        // frame (see file header BATCHED REVEAL). Radius magnitude still
+        // comes from the CARD count (total, 4...20) -- the collage's
+        // overall footprint is unchanged from the wider-spread pass;
+        // only which cards share a spiral point has changed. Ellipse
+        // sized to the frame's own width/height (not a circle capped by
+        // whichever axis is smaller) -- see WIDER SPREAD in the file
+        // header for why.
         let goldenAngle = 137.5 * .pi / 180
-        let angle = Double(index) * goldenAngle
+        let anchorAngle = Double(placement.batchIndex) * goldenAngle
         let maxRadiusFraction = 0.16 + 0.22 * (Double(total - 1) / 19.0) // grows with n
-        let indexFactor = 0.35 + 0.65 * (Double(index) / Double(max(total - 1, 1)))
+        let anchorFactor = 0.35 + 0.65 * (Double(placement.batchIndex) / Double(max(placement.totalBatches - 1, 1)))
         let spreadScale = collageAreaGrowth.squareRoot()
 
-        let desiredRadiusX = bounds.width * maxRadiusFraction * indexFactor * spreadScale
-        let desiredRadiusY = bounds.height * maxRadiusFraction * indexFactor * spreadScale
-        let radiusX = min(desiredRadiusX, max(bounds.width / 2 - size.width / 2, 0))
-        let radiusY = min(desiredRadiusY, max(bounds.height / 2 - size.height / 2, 0))
+        let anchorRadiusX = bounds.width * maxRadiusFraction * anchorFactor * spreadScale
+        let anchorRadiusY = bounds.height * maxRadiusFraction * anchorFactor * spreadScale
+        let anchorX = center.x + anchorRadiusX * cos(anchorAngle)
+        let anchorY = center.y + anchorRadiusY * sin(anchorAngle)
 
-        let x = center.x + radiusX * cos(angle)
-        let y = center.y + radiusY * sin(angle)
+        // INTRA-BATCH JITTER: a small offset from the anchor so batch-
+        // mates visibly overlap each other's corners/edges. Members are
+        // spaced evenly around the anchor (2π / batchSize apart); the
+        // batchIndex-seeded phase keeps different batches from all
+        // jittering in the same directions, which would look mechanical.
+        let jitterAngle = Double(placement.positionInBatch) * (2 * .pi / Double(max(placement.batchSize, 1)))
+            + Double(placement.batchIndex) * 0.7
+        let jitterRadius = min(size.width, size.height) * intraBatchJitterFraction
+        let desiredX = anchorX + jitterRadius * cos(jitterAngle)
+        let desiredY = anchorY + jitterRadius * sin(jitterAngle)
 
-        return Slot(center: CGPoint(x: x, y: y), size: size, rotation: rotation(for: index))
+        // HARD CLAMP on the FINAL position (anchor + jitter together) --
+        // "must not clip" holds by construction across whatever the real
+        // on-device frame size turns out to be, not by hoping
+        // collageAreaGrowth/intraBatchJitterFraction were tuned
+        // conservatively enough.
+        let x = min(max(desiredX, size.width / 2), max(bounds.width - size.width / 2, size.width / 2))
+        let y = min(max(desiredY, size.height / 2), max(bounds.height - size.height / 2, size.height / 2))
+
+        return Slot(center: CGPoint(x: x, y: y), size: size, rotation: rotation(for: cardIndex))
     }
 }
