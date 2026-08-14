@@ -259,6 +259,13 @@ struct CurationSequenceView: View {
         static let maxBatchSizeAtLowN: Int = 3
         static let minBatchSizeAtHighN: Int = 3
         static let maxBatchSizeAtHighN: Int = 5
+        /// Extra pause AFTER the last card has fully settled, before
+        /// auto-advancing to the first edit screen -- without this the
+        /// finished collage is never actually seen at rest, since
+        /// onComplete() fires the instant the last card's own fade
+        /// ends. Added once, at the end of totalRevealDuration, not
+        /// per-batch.
+        static let postSettleHold: Double = 0.7
     }
 
     private enum Phase {
@@ -622,7 +629,7 @@ struct CurationSequenceView: View {
     private func totalRevealDuration(for batches: [RevealBatch]) -> Double {
         let intraBatchTime = batches.reduce(0.0) { $0 + Double(max($1.ids.count - 1, 0)) * ShowcaseTiming.intraBatchOffset }
         let gapTime = Double(max(batches.count - 1, 0)) * ShowcaseTiming.batchGap
-        return ShowcaseTiming.firstCardDelay + intraBatchTime + gapTime + ShowcaseTiming.cardFadeInDuration
+        return ShowcaseTiming.firstCardDelay + intraBatchTime + gapTime + ShowcaseTiming.cardFadeInDuration + ShowcaseTiming.postSettleHold
     }
 
     /// Resolves the shuffle deck into the collage and starts the
