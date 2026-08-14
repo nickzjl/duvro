@@ -109,7 +109,7 @@ The mockup blurs and dims the photo behind the sheet, so the user cannot see the
 
 - **Vibe selection:** variant names still clip off the right edge ("SOFT G…", "FADED POSTCARD ·"). Wrap to two lines or reduce type size. Screen also has no visible primary CTA — correct, since the pack preview sheet's "use this vibe" is the CTA (UI_NOTES §3), but make sure tapping a card is obviously tappable.
 - **Photo count field** is a sharp-cornered rectangle while every other element uses continuous rounded corners. Normalize.
-- **Back button** is missing on the first edit screen but present on later ones. Every screen after welcome gets a back control.
+- **Back button** is missing on the first edit screen but present on later ones. Every screen after welcome gets a back control — **except edit photo 1**, which is a deliberate exception (superseded once the curation progress/showcase sequence was built, §4): the screen before it is the curation showcase, which shouldn't be replayable, and there is genuinely nowhere else to go back to without discarding the curation. Hidden entirely on photo 1 (not just disabled) since a visibly-tappable control that does nothing invites the tap; appears from photo 2 onward, where it returns to the previous photo with its pick intact.
 - **Aspect ratios still mixed:** edit screens show square, final review shows portrait. Normalize to 4:5 everywhere (§1).
 - **Final review CTA** reads "save the collection" — wrong model. Should read as continuing to the post, e.g. "add a caption."
 - **Edit screen primary button** reads "save and continue" in the mockups — same objection as above: nothing is saved at that point (no persistence in v1; export happens only at handoff). Canonical label: **"keep this one."**

@@ -14,7 +14,11 @@
 //  advances. "skip this photo" removes the current pick and backfills
 //  (SessionStore.skipPhoto). Back returns to the previous photo with its
 //  pick intact and re-editable (displayedVariantIndex re-seeds from
-//  SessionStore.pickedVariantName, not reset to 0).
+//  SessionStore.pickedVariantName, not reset to 0). Hidden entirely (not
+//  disabled) on photo 1 -- UI_NOTES §6's back-control fix carves out an
+//  explicit exception there: the previous screen is the curation
+//  showcase, not replayable, and there's nowhere else to go back to
+//  without discarding the curation. Appears from photo 2 onward.
 //
 //  ADVANCED SHEET (intensity/brightness/contrast -- UI_NOTES §5, prd.md
 //  P0.8): the dimming/blur question is resolved (BUILD_ROADMAP Known
@@ -225,20 +229,34 @@ struct EditFlowView: View {
 
     private var topBar: some View {
         HStack {
-            Button {
-                if isScoped {
+            if isScoped {
+                Button {
                     dismiss()
-                } else {
-                    goBack()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color(hex: "171614"))
+                        .frame(width: 44, height: 44)
                 }
-            } label: {
-                Image(systemName: isScoped ? "xmark" : "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color(hex: "171614"))
-                    .frame(width: 44, height: 44)
+            } else if currentIndex > 0 {
+                Button {
+                    goBack()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color(hex: "171614"))
+                        .frame(width: 44, height: 44)
+                }
+            } else {
+                // UI_NOTES §6: hidden, not just disabled, on photo 1 --
+                // there's genuinely nowhere to go (the previous screen is
+                // the curation showcase, which shouldn't be replayable,
+                // and further back would discard the curation). Reserves
+                // the same 44x44 slot as the real button so "1 of n"
+                // stays centered, matching the balancing spacer on the
+                // right below.
+                Color.clear.frame(width: 44, height: 44)
             }
-            .disabled(!isScoped && currentIndex == 0)
-            .opacity(!isScoped && currentIndex == 0 ? 0.3 : 1)
 
             Spacer()
 
