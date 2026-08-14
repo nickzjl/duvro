@@ -68,19 +68,26 @@ Exact values below — no reference files needed. Implement natively in SwiftUI.
 - **Offline / endpoint-failure fallback (flagged — decision made under time pressure, may be revisited):** if the curation call fails or there's no network, curation falls back to an on-device-only ranking of the Stage 1 shortlist rather than blocking — the user still gets a post, and this is NOT surfaced as an error state; the progress screen continues normally into the showcase. Whether a silent fallback is the right call (vs. a visible degraded-mode notice) hasn't been tested — revisit if BUILD_ROADMAP's Phase 3.5 overlap test shows the fallback's quality is noticeably worse.
 - **Continuity:** the progress screen and the showcase are one continuous moment. Same card treatment, same photos; the stack resolves into the collage rather than cutting to a new screen.
 
-**Curation showcase — the signature moment.** Headline: **"our favorites."** The chosen photos fade in one at a time, accumulating into a collage of print-bordered cards. Exact timing (extracted from the approved mockup):
-- **Per-card animation:** 1.2s, ease-out. From `opacity 0, offset y +10pt` → `opacity 1, offset y 0`.
-- **Stagger — scales with photo count, not fixed.** The approved mockup showed 13 cards at a 0.2s stagger totaling ≈3.7s, but card count equals the user's chosen photo count (4–20 per PRD §4), so a fixed 0.2s stagger would make the sequence run anywhere from 1.9s to 5.1s. **The "~13 cards → 3.7s" figure was a mockup artifact, not a spec — do not reintroduce a fixed stagger.** Instead:
+**Curation showcase — the signature moment.** Headline: **"our favorites."** The chosen photos fade in one at a time, each new card landing ON TOP of what's already there, accumulating into a collage of print-bordered cards.
+- **Reveal order — bookended, not composite order.** Rank 1 (the strongest photo) is the FIRST card to appear. Rank 2 is the LAST — it lands on top of everything and remains the most visible card once the sequence settles. Every other selected photo fills in between, in composite order. *(Why rank 2 gets a second turn: since each new card lands on top of the last, the opening card inevitably ends up covered as the rest of the collage builds. Rank 2 gives the two strongest photos each a moment alone in the spotlight — one at the start, one at the end, where nothing lands after it.)*
+- **Stacking follows arrival order, not rank.** The card that just faded in is always the topmost layer. Rank 1 and rank 2 share the same signature slot — dead center, largest — so rank 2 visually "takes over" that slot from rank 1 at the very end.
+- **Per-card animation:** 1.8s, ease-out. From `opacity 0, offset y +10pt` → `opacity 1, offset y 0`. *(Slower than earlier drafts of this spec — 1.8s gives each photo time to actually be seen before the next one lands, which matters more now that arrival order controls visibility.)*
+- **Stagger — scales with photo count, not fixed.** Card count equals the user's chosen photo count (4–20 per PRD §4), so a fixed stagger would make the sequence run at wildly different total lengths depending on count. Do not reintroduce a fixed stagger. Named constants below match `CurationSequenceView.ShowcaseTiming` in code — change both together if either needs retuning:
   ```
   n = number of selected photos
-  first card delay = 0.1s
-  stagger = clamp((3.4 - 1.3) / (n - 1), 0.10, 0.28)   // seconds between cards
-  total   = 0.1 + (n - 1) * stagger + 1.2               // seconds, end-to-end
+  firstCardDelay    = 0.2s
+  staggerNumerator  = 4.0
+  minStagger        = 0.20s
+  maxStagger        = 0.50s
+  cardFadeInDuration = 1.8s
+
+  stagger = clamp(staggerNumerator / (n - 1), minStagger, maxStagger)   // seconds between cards
+  total   = firstCardDelay + (n - 1) * stagger + cardFadeInDuration     // seconds, end-to-end
   ```
-  Guard `n = 1` separately (the stagger formula divides by `n - 1`): there's no gap to compute, so the sequence is just the first card's delay plus its animation.
-  Worked examples: n=7 → stagger 0.28s (clamped), total ≈2.98s. n=13 → stagger 0.175s, total ≈3.4s. n=20 → stagger 0.11s, total ≈3.39s. n=1 → single card, ≈1.3s.
+  Guard `n = 1` separately (the stagger formula divides by `n - 1`): there's no gap to compute, so the sequence is just `firstCardDelay + cardFadeInDuration`.
+  Worked examples: n=1 → single card, 2.0s. n=4 → stagger 0.50s (clamped), total 3.5s. n=7 → stagger 0.50s (clamped), total 5.0s. n=13 → stagger 0.33s, total 6.0s. n=20 → stagger 0.21s, total 6.0s. **Total holds at 6.0s from n=9 upward rather than growing with n** — this is what keeps a 20-photo post from dragging while still giving small posts a noticeably slower, more legible reveal than a fixed-duration approach would.
 - **Rotation: 0°.** Cards are aligned, not scattered — the mockup's polish comes from overlap and layering, not tilt.
-- Cards overlap with varied z-order and size; layout is a fixed collage, not a grid.
+- Cards overlap with varied size; layout is a fixed collage, not a grid.
 - All images are the user's real photos from this session — that's the entire hook.
 - No buttons, no progress indicator, no interaction. Auto-advances to the first edit screen when the sequence completes.
 - This is the most screen-recordable beat in the app: it must feel like a reveal, not a loading state.

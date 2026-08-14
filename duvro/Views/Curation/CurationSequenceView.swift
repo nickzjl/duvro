@@ -54,32 +54,71 @@
 //  of the chosen pack's variants, cycling in finalSelection order
 //  (card i -> pack.variants[i % pack.variants.count]) rather than
 //  assigning randomly -- this guarantees every variant appears and none
-//  clusters together regardless of n. Card 0 -- CollageLayout's
-//  front-and-center, largest, top-z-order slot, and finalSelection's
-//  strongest photo since it's composite-ranked -- always gets
-//  pack.variants[0], the pack's signature look, so the most prominent
-//  card leads with it. Reasoning: the collage is the hook, and variety
-//  within one aesthetic (a Y2K date stamp next to a Polaroid frame next
-//  to a light leak, for Digicam) is more compelling than n cards at the
-//  same grade. PERFORMANCE: this is NOT 3x the render work -- each
-//  photo still renders exactly once (in its assigned variant, not all
-//  three), so the total render count is unchanged from the
-//  single-variant version, still ~n renders at 8-17ms/render measured
-//  elsewhere in this codebase, comfortably absorbed by the shuffle
-//  phase's runway. Rendered off-thread as soon as the final selection
-//  is known (well before the collage phase begins). Falls back to the
-//  photo's own thumbnail (EditFlowView's same fail-safe pattern) for
-//  any card whose render isn't ready yet.
+//  clusters together regardless of n. Card 0 -- finalSelection's
+//  strongest photo, since it's composite-ranked, and the first card
+//  revealed in the bookend reveal order below -- always gets
+//  pack.variants[0], the pack's signature look, so the sequence leads
+//  with it. Reasoning: the collage is the hook, and variety within one
+//  aesthetic (a Y2K date stamp next to a Polaroid frame next to a light
+//  leak, for Digicam) is more compelling than n cards at the same
+//  grade. PERFORMANCE: this is NOT 3x the render work -- each photo
+//  still renders exactly once (in its assigned variant, not all three),
+//  so the total render count is unchanged from the single-variant
+//  version, still ~n renders at 8-17ms/render measured elsewhere in
+//  this codebase, comfortably absorbed by the shuffle phase's runway.
+//  Rendered off-thread as soon as the final selection is known (well
+//  before the collage phase begins). Falls back to the photo's own
+//  thumbnail (EditFlowView's same fail-safe pattern) for any card
+//  whose render isn't ready yet.
 //
-//  CONTINUOUS TRANSITION (Task 4, the hard part): cards that are both
-//  (a) in the shuffle snapshot's currently-visible window at resolve
-//  time and (b) in the final selection carry through via
-//  matchedGeometryEffect (one shared @Namespace, keyed by PhotoScore.id,
-//  used in both phases) -- they animate from their shuffle position
-//  straight into their collage slot rather than fading out and a new
-//  card fading in. Every other final-selection card runs the normal
-//  per-card reveal (1.2s ease-out, opacity 0->1, offset y+10->0,
-//  UI_NOTES' own adaptive stagger).
+//  REVEAL ORDER + STACKING (redesigned this session -- UI_NOTES §4
+//  updated to match; this replaces the old rank-ordered, fixed-z-index
+//  behavior described below under CONTINUOUS TRANSITION):
+//
+//  Each card now fades in ON TOP of whatever's already on screen --
+//  zIndex follows ARRIVAL order (revealOrder below), not composite
+//  rank, so the sequence reads as a genuine accumulation rather than
+//  new cards vanishing behind the first one. That inverts the old
+//  behavior, where index 0's fixed top z-order meant every later card
+//  actually disappeared behind it.
+//
+//  Because arrival order now controls visibility, the strongest photo
+//  (finalSelection[0], "rank 1") loses its old guarantee of staying on
+//  top once later cards land over it -- so rank 1 OPENS the sequence
+//  and rank 2 (finalSelection[1]) CLOSES it: revealed dead last, it
+//  ends up the topmost, most visible card once the sequence settles,
+//  giving the two strongest photos each a moment alone in the
+//  spotlight, one at the start and one at the end. Both share
+//  CollageLayout's single hero slot (dead center, largest) -- rank 2
+//  visually "takes over" that slot from rank 1 at the very end, since
+//  slot geometry is keyed by finalSelection index (0 and 1 both map to
+//  the hero slot) while stacking is keyed by arrival order, not that
+//  index. Every other selected photo reveals in between, in composite
+//  order, filling CollageLayout's spiral slots (index 2+).
+//
+//  CONTINUITY (UI_NOTES §4's "one continuous moment") is preserved
+//  ONLY for rank 1: if its card happens to be one of the shuffle
+//  deck's currently-visible cards at the instant this phase resolves,
+//  matchedGeometryEffect (one shared @Namespace, keyed by
+//  PhotoScore.id, used in both phases) carries it straight into the
+//  collage instead of fading in fresh -- since rank 1 is first in the
+//  reveal order anyway, an instant start doesn't conflict with the
+//  ordering guarantee above. No other card gets this treatment,
+//  including rank 2: letting a middle-order card or rank 2 appear
+//  early would break "rank 1 first, rank 2 last." Every card that
+//  doesn't get this treatment runs the normal per-card reveal (opacity
+//  0->1, offset y+10->0) at ShowcaseTiming's pacing.
+//
+//  TIMING: see ShowcaseTiming below -- THE constants to tune this
+//  sequence's pacing. Deliberately slower and longer than the
+//  mockup-derived values UI_NOTES §4 used to specify (1.2s/card, a
+//  0.10-0.28s stagger clamp), which were extracted from a mockup, not
+//  tested against this design, and read as rushed once the bookend
+//  reveal order was in place. The stagger formula still scales with n
+//  (per-card delay shrinks as photo count grows) and is clamped so a
+//  20-photo post doesn't drag: total holds at exactly
+//  ShowcaseTiming.firstCardDelay + staggerNumerator + cardFadeInDuration
+//  (~6.0s) from n=9 upward rather than growing unbounded with n.
 //
 
 import SwiftUI
@@ -98,6 +137,21 @@ struct CurationSequenceView: View {
     #if DEBUG
     private let debugMinimumDuration: Double = 6.0
     #endif
+
+    /// THE constants to tune the showcase reveal's pacing -- see file
+    /// header's TIMING note. UI_NOTES §4 documents this exact formula;
+    /// change values here AND there together so the doc and the code
+    /// don't drift.
+    private enum ShowcaseTiming {
+        /// Per-card fade: opacity 0->1, offset y+10->0.
+        static let cardFadeInDuration: Double = 1.8
+        /// Delay before the first (non-carried-through) card appears.
+        static let firstCardDelay: Double = 0.2
+        /// stagger = clamp(staggerNumerator / (n - 1), minStagger, maxStagger).
+        static let staggerNumerator: Double = 4.0
+        static let minStagger: Double = 0.20
+        static let maxStagger: Double = 0.50
+    }
 
     private enum Phase {
         case shuffling
@@ -139,10 +193,11 @@ struct CurationSequenceView: View {
     // MARK: - Showcase reveal state
 
     @State private var revealedCardIDs: Set<UUID> = []
-    /// Card IDs that carried through from the shuffle deck -- these
-    /// start the collage phase ALREADY revealed (matched-geometry
-    /// animates their position/rotation instead of fading in).
-    @State private var carriedThroughIDs: Set<UUID> = []
+    /// Arrival order, assigned as each card is revealed (0 = first) --
+    /// drives z-index (CHANGE 1: cards land ON TOP, not behind -- see
+    /// file header REVEAL ORDER + STACKING). Replaces the old
+    /// rank-based zIndex that used to live on CollageLayout.Slot.
+    @State private var revealOrder: [UUID: Int] = [:]
 
     var body: some View {
         ZStack {
@@ -243,10 +298,10 @@ struct CurationSequenceView: View {
         .matchedGeometryEffect(id: score.id, in: cardNamespace)
         .rotationEffect(.degrees(0)) // UI_NOTES §4: showcase rotation is 0°, unlike the shuffle deck
         .position(x: slot.center.x, y: slot.center.y)
-        .zIndex(slot.zIndex)
+        .zIndex(Double(revealOrder[score.id] ?? -1)) // CHANGE 1: arrival order, not rank -- see file header
         .opacity(revealed ? 1 : 0)
         .offset(y: revealed ? 0 : 10)
-        .animation(.easeOut(duration: 1.2), value: revealed)
+        .animation(.easeOut(duration: ShowcaseTiming.cardFadeInDuration), value: revealed)
     }
 
     // MARK: - Sequencing
@@ -372,50 +427,75 @@ struct CurationSequenceView: View {
         resolveIntoCollage()
     }
 
-    /// Cards visible in the shuffle deck's current window AND present in
-    /// finalSelection carry through (matchedGeometryEffect handles the
-    /// actual animation, since both phases key the same view by
-    /// PhotoScore.id in the same @Namespace) -- everything else in
-    /// finalSelection runs the adaptive-stagger reveal from file
-    /// header/UI_NOTES §4's exact formula.
-    private func resolveIntoCollage() {
-        let visibleInDeck = Set(ShuffleDeck.visibleIDs(snapshot: shuffleSnapshot, tick: shuffleTick))
-        let finalIDs = Set(finalSelection.map(\.id))
-        carriedThroughIDs = visibleInDeck.intersection(finalIDs)
-        revealedCardIDs = carriedThroughIDs
+    /// Builds the bookend reveal order (CHANGE 2 -- see file header):
+    /// rank 1 first, rank 2 last, everything else in between in
+    /// composite order. `n <= 2` degenerates naturally -- with no
+    /// "everything else," it's just [rank 1] or [rank 1, rank 2].
+    private func bookendOrder() -> [UUID] {
+        let ids = finalSelection.map(\.id)
+        guard ids.count > 2 else { return ids }
+        return [ids[0]] + ids[2...] + [ids[1]]
+    }
 
+    /// Resolves the shuffle deck into the collage and starts the
+    /// bookend reveal sequence -- see file header REVEAL ORDER +
+    /// STACKING. Rank 1 carries through via matchedGeometryEffect if
+    /// it's currently deck-visible (continuity); every other card,
+    /// including rank 2, always runs the normal staggered fade so the
+    /// "rank 1 first, rank 2 last" guarantee can't be short-circuited
+    /// by shuffle-deck timing coincidence.
+    private func resolveIntoCollage() {
+        let orderedIDs = bookendOrder()
         phase = .collage
 
-        let n = finalSelection.count
-        guard n > 0 else {
+        guard !orderedIDs.isEmpty else {
             onComplete()
             return
         }
 
-        let toReveal = finalSelection.map(\.id).filter { !carriedThroughIDs.contains($0) }
+        var toReveal = orderedIDs
+        if let rank1 = orderedIDs.first,
+           ShuffleDeck.visibleIDs(snapshot: shuffleSnapshot, tick: shuffleTick).contains(rank1) {
+            revealedCardIDs = [rank1]
+            revealOrder[rank1] = 0
+            toReveal.removeFirst()
+        }
+
+        let n = finalSelection.count
         guard n > 1 else {
             // Guard n=1 separately (UI_NOTES §4): no stagger to compute,
             // just the first card's own delay + animation.
-            revealSequentially(ids: toReveal, firstDelay: 0.1, stagger: 0, cardAnimation: 1.2)
+            revealSequentially(ids: toReveal, firstDelay: ShowcaseTiming.firstCardDelay, stagger: 0)
+            Task {
+                try? await Task.sleep(for: .seconds(ShowcaseTiming.firstCardDelay + ShowcaseTiming.cardFadeInDuration))
+                onComplete()
+            }
             return
         }
-        let stagger = min(max((3.4 - 1.3) / Double(n - 1), 0.10), 0.28)
-        revealSequentially(ids: toReveal, firstDelay: 0.1, stagger: stagger, cardAnimation: 1.2)
+        let stagger = min(max(ShowcaseTiming.staggerNumerator / Double(n - 1), ShowcaseTiming.minStagger), ShowcaseTiming.maxStagger)
+        revealSequentially(ids: toReveal, firstDelay: ShowcaseTiming.firstCardDelay, stagger: stagger)
 
-        let total = 0.1 + Double(n - 1) * stagger + 1.2
+        // Always computed against the full n (per UI_NOTES §4's
+        // formula), regardless of whether rank 1 carried through --
+        // matches this codebase's existing convention (see git
+        // history), so the doc's worked examples stay accurate no
+        // matter what the shuffle deck happened to be showing.
+        let total = ShowcaseTiming.firstCardDelay + Double(n - 1) * stagger + ShowcaseTiming.cardFadeInDuration
         Task {
             try? await Task.sleep(for: .seconds(total))
             onComplete()
         }
     }
 
-    private func revealSequentially(ids: [UUID], firstDelay: Double, stagger: Double, cardAnimation: Double) {
+    private func revealSequentially(ids: [UUID], firstDelay: Double, stagger: Double) {
         guard !ids.isEmpty else { return }
+        let startingOrder = revealOrder.count
         Task {
             try? await Task.sleep(for: .seconds(firstDelay))
-            for id in ids {
+            for (offset, id) in ids.enumerated() {
                 guard !Task.isCancelled else { return }
                 revealedCardIDs.insert(id)
+                revealOrder[id] = startingOrder + offset
                 try? await Task.sleep(for: .seconds(stagger))
             }
         }
@@ -514,10 +594,12 @@ private struct ShuffleDeck: View {
 /// rather than a formula that degrades smoothly, since "fixed collage,
 /// not a grid" (UI_NOTES §4) is itself the spec -- see `slot(index:total:in:)`.
 private enum CollageLayout {
+    /// No zIndex here -- stacking is driven by reveal ARRIVAL order
+    /// (CurationSequenceView.revealOrder), not by rank/index, since
+    /// this session's redesign. See file header REVEAL ORDER + STACKING.
     struct Slot {
         let center: CGPoint
         let size: CGSize
-        let zIndex: Double
     }
 
     /// Base card size at n=4 (largest) down to n=20 (smallest), linearly
@@ -540,13 +622,27 @@ private enum CollageLayout {
         let base = baseCardSize(for: total, in: bounds)
         let center = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
         guard total > 1 else {
-            return Slot(center: center, size: base, zIndex: 0)
+            return Slot(center: center, size: base)
+        }
+
+        // Rank 1 (index 0) and rank 2 (index 1) share the SAME
+        // signature hero slot -- dead center, largest. Rank 1 opens
+        // the reveal sequence there; rank 2 lands on top of it last
+        // (arrival-order z-index, not this slot, decides who's on top
+        // -- see CurationSequenceView.collageCard) and keeps that slot
+        // once the sequence settles, visually "taking over" from rank
+        // 1. See file header REVEAL ORDER + STACKING.
+        if index == 0 || index == 1 {
+            let heroSize = CGSize(width: base.width * 1.18, height: base.height * 1.18)
+            return Slot(center: center, size: heroSize)
         }
 
         // Golden-angle spiral, radius scaled down so the whole spread
         // stays within bounds even at the largest (n=4) card size --
         // more cards (n=20) get a proportionally larger spread radius
-        // since their cards are individually smaller.
+        // since their cards are individually smaller. Every other card
+        // gets a mild per-index size jitter (varied size, per UI_NOTES
+        // §4).
         let goldenAngle = 137.5 * .pi / 180
         let angle = Double(index) * goldenAngle
         let maxRadiusFraction = 0.16 + 0.22 * (Double(total - 1) / 19.0) // grows with n
@@ -555,17 +651,8 @@ private enum CollageLayout {
         let x = center.x + radius * cos(angle)
         let y = center.y + radius * sin(angle)
 
-        // Front-and-center prominence for the strongest photo (index 0,
-        // composite order today -- see file header / BUILD_ROADMAP Phase
-        // 3.5 doc note for the ranking-input plan): largest size, dead
-        // center, top z-order. Every other card gets a mild per-index
-        // size jitter (varied size, per UI_NOTES §4) and descending
-        // z-order (so earlier/stronger photos sit visually on top).
-        if index == 0 {
-            return Slot(center: center, size: CGSize(width: base.width * 1.18, height: base.height * 1.18), zIndex: Double(total))
-        }
         let jitter = 0.85 + 0.3 * abs(sin(Double(index) * 12.9898))
         let size = CGSize(width: base.width * jitter, height: base.height * jitter)
-        return Slot(center: CGPoint(x: x, y: y), size: size, zIndex: Double(total - index))
+        return Slot(center: CGPoint(x: x, y: y), size: size)
     }
 }
