@@ -21,13 +21,31 @@
 //  not to this file.
 //
 //  RAW ORIGINALS, NOT RENDERED (deliberate, temporary -- see UI_NOTES §3):
-//  the sample grid shows samplePhotos[index].thumbnail directly, unedited.
-//  Previously rendered each sample through the pack's first variant (with
-//  a PackPreviewRenderCache to keep reopening instant); removed rather
+//  the sample grid shows the unedited source photo. Previously rendered
+//  each sample through the pack's first variant (with a
+//  PackPreviewRenderCache to keep reopening instant); removed rather
 //  than left dangling-but-unused, since the packs are untuned and a
 //  rendered preview right now would show the untuned look, not what the
 //  pack is meant to look like. Restore the variant-rendering + cache pair
 //  (git history has the previous version) once pack tuning is done.
+//
+//  FULL RESOLUTION, NOT Photo.thumbnail (bug found after the raw-
+//  originals change above shipped -- previews read visibly soft/blurry
+//  compared to the actual SampleAssets files). DIAGNOSIS: Photo.thumbnail
+//  is capped at 200px on its longest edge (PhotoImportService.
+//  thumbnailImage(maxPixelSize: 200), the same cap used for the
+//  in-memory import grid) -- fine for a 60pt grid cell, but the large
+//  tile here renders at roughly 0.58 * sheet width, which on a real
+//  device at 2x/3x scale needs 600-1200+px to stay crisp. No
+//  interpolation modifier is degrading anything, and the drawn frame
+//  size is correct -- the SOURCE bitmap being fed in was just too small,
+//  upscaled ~3-6x by .resizable(). Fixed by loading photo.originalURL
+//  directly (fullResImages below), the exact file bytes in SampleAssets/,
+//  at its own native resolution -- not re-downsampled at all. Async
+//  (Task.detached, off the main thread) since these are real file reads,
+//  even though local/bundled and fast; thumbnail is kept as the fallback
+//  for the one frame before that completes, same fail-toward-something-
+//  visible pattern used elsewhere in this codebase.
 //
 
 import SwiftUI
@@ -45,6 +63,11 @@ struct PackPreviewSheet: View {
     var onUseThisVibe: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    /// Loaded from photo.originalURL, at native resolution -- see file
+    /// header FULL RESOLUTION note. Keyed by Photo.id, populated once
+    /// per pack (`.task(id: pack.id)`), so switching packs (a different
+    /// sheet instance each time, but belt-and-suspenders) reloads.
+    @State private var fullResImages: [UUID: UIImage] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +85,9 @@ struct PackPreviewSheet: View {
             ctaStack
         }
         .background(Color(hex: "F7F4EE").ignoresSafeArea())
+        .task(id: pack.id) {
+            await loadFullResImagesIfNeeded()
+        }
     }
 
     // MARK: - Header (pack title + variant names, UI_NOTES §1 + fix 3)
@@ -178,9 +204,11 @@ struct PackPreviewSheet: View {
     private func tile(_ index: Int, size: CGSize) -> some View {
         Group {
             if samplePhotos.indices.contains(index) {
-                // Raw original, unedited -- see file header. Temporary
-                // while the packs are untuned; not a rendered variant.
-                Image(uiImage: samplePhotos[index].thumbnail)
+                // Raw original, unedited, at full resolution -- see file
+                // header. Falls back to the 200px thumbnail only for the
+                // one frame before loadFullResImagesIfNeeded() completes.
+                let photo = samplePhotos[index]
+                Image(uiImage: fullResImages[photo.id] ?? photo.thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
@@ -249,5 +277,18 @@ struct PackPreviewSheet: View {
         .padding(.top, 12)
         .padding(.bottom, 8)
         .background(Color(hex: "F7F4EE"))
+    }
+
+    // MARK: - Full-resolution loading (see file header FULL RESOLUTION note)
+
+    private func loadFullResImagesIfNeeded() async {
+        let photos = samplePhotos
+        let loaded = await Task.detached(priority: .userInitiated) {
+            Dictionary(uniqueKeysWithValues: photos.compactMap { photo -> (UUID, UIImage)? in
+                guard let image = UIImage(contentsOfFile: photo.originalURL.path) else { return nil }
+                return (photo.id, image)
+            })
+        }.value
+        fullResImages = loaded
     }
 }
