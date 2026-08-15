@@ -1,30 +1,13 @@
 {
   "_schemaNote": "toneCurve points are [x, y] pairs, e.g. [0.25, 0.24] -- NOT {\"x\":...,\"y\":...} objects. This matches CGPoint's actual Codable wire format (an unkeyed 2-element array), confirmed against CoreGraphics.swiftinterface -- {x,y} was a real bug shipped once (decode failure on device, every variant). Digicam/Travel Film authors: copy this format.",
-  "_tuningNote": "TUNED from a hand-graded reference image (Lightroom units), converted onto CoreImage's parameter ranges -- see EditOp.swift/EditEngine.swift. First-pass conversion math: EV->brightness via a mid-gray anchor, LR contrast/saturation percent points -> CIColorControls multiplier offset from 1.0, temperature as a mired-space warming delta against a fixed 6500K/tint-0 baseline (matches EditEngine.temperatureTint's own fixed source neutral), 0-255 tone-curve values normalized to 0-1, bloom radius-as-percent-of-width converted to pixels against the 1280px preview reference width. Tone curves for Warm Film/Soft Glow reduced from the reference's 7 points to CIToneCurve's required 5 by dropping the two innermost 1/8-and-7/8 handles (keeping 0, 1/4, 1/2, 3/4, 1) -- within ~2/255 of the straight line between their surviving neighbors. 'Faded blacks' was NOT routed through the fade op -- it's numerically identical to each variant's own tone-curve black point (point0), the same data named twice; applying both would double the shadow lift, so fade is dropped from this pack's chain entirely.",
-  "_tuningNoteRound2": "THREE bugs found rendering on-device, all fixed here -- see EditEngine.swift's applyGrain doc comment and git history for the full diagnosis of each. (1) GRAIN: intensity used to control only the noise's own internal contrast, never the blend's actual opacity, so grain rendered at ~full strength regardless of the value -- fixed in EditEngine (grain now blends toward the original by `intensity` via the same helper the advanced sheet's intensity slider uses); intensity values here cut to roughly 1/10 of the prior pass's numbers as a starting point, to be tuned up from here. (2) SHADOWS CRUSHING INSTEAD OF LIFTING: colorControls' brightness/contrast used to run AFTER toneCurve, so an EV-derived brightness (additive, disproportionately affects near-black pixels) and contrast (pivots around 0.5, pushes below-midpoint values darker) were both undoing the tone curve's own shadow lift. Reordered to temperatureTint -> colorControls -> vibrance -> toneCurve -> vignette -> bloom -> grain, matching Lightroom's own actual internal order (Basic panel, including Exposure/Contrast/Vibrance/Saturation, before the separate Tone Curve panel, before Effects) -- toneCurve is now the LAST tonal op, so its own point0 is the final word on the black point regardless of what ran before it. (3) TINT DIRECTION was RE-VERIFIED, not just re-guessed, after Sun-kissed rendered green/olive instead of warm/amber: a throwaway CoreImage script re-ran the exact neutral-gray test from the first tuning pass and confirmed the SIGN is still correct (negative targetNeutral.y is magenta in this fixed-neutral-6500 configuration, consistently, on neutral gray AND several plausible non-neutral photo-like base colors). The bug was MAGNITUDE, not direction: the first pass's 1:1 pass-through of Lightroom's small tint numbers (+8/+4/+7) into CITemperatureAndTint's own tint units was never actually validated the way temperature's mired conversion was -- a parameter sweep against a plausible warm-toned base color showed roughly 4x the original magnitude was needed before the result read reliably warm rather than olive. Values here are that estimate (unlike temperature's mired math, this one is NOT independently derived from a documented conversion factor -- treat as a starting point, confirm on-device).",
+  "_tuningNote": "TUNED from a hand-graded reference image (Lightroom units), converted onto CoreImage's parameter ranges -- see EditOp.swift/EditEngine.swift. First-pass conversion math: EV->brightness via a mid-gray anchor, LR contrast/saturation percent points -> CIColorControls multiplier offset from 1.0, temperature as a mired-space warming delta against a fixed 6500K/tint-0 baseline (matches EditEngine.temperatureTint's own fixed source neutral), 0-255 tone-curve values normalized to 0-1, bloom radius-as-percent-of-width converted to pixels against the 1280px preview reference width. Tone curves for what's now Warm Film / Soft Glow (see _tuningNoteRound3 -- names were swapped) reduced from the reference's 7 points to CIToneCurve's required 5 by dropping the two innermost 1/8-and-7/8 handles (keeping 0, 1/4, 1/2, 3/4, 1) -- within ~2/255 of the straight line between their surviving neighbors. 'Faded blacks' was NOT routed through the fade op -- it's numerically identical to each variant's own tone-curve black point (point0), the same data named twice; applying both would double the shadow lift, so fade is dropped from this pack's chain entirely.",
+  "_tuningNoteRound2": "THREE bugs found rendering on-device, all fixed here -- see EditEngine.swift's applyGrain doc comment and git history for the full diagnosis of each. (1) GRAIN: intensity used to control only the noise's own internal contrast, never the blend's actual opacity, so grain rendered at ~full strength regardless of the value -- fixed in EditEngine (grain now blends toward the original by `intensity` via the same helper the advanced sheet's intensity slider uses); intensity values here cut to roughly 1/10 of the prior pass's numbers as a starting point, to be tuned up from here. (2) SHADOWS CRUSHING INSTEAD OF LIFTING: colorControls' brightness/contrast used to run AFTER toneCurve, so an EV-derived brightness (additive, disproportionately affects near-black pixels) and contrast (pivots around 0.5, pushes below-midpoint values darker) were both undoing the tone curve's own shadow lift. Reordered to temperatureTint -> colorControls -> vibrance -> toneCurve -> vignette -> bloom -> grain, matching Lightroom's own actual internal order (Basic panel, including Exposure/Contrast/Vibrance/Saturation, before the separate Tone Curve panel, before Effects) -- toneCurve is now the LAST tonal op, so its own point0 is the final word on the black point regardless of what ran before it. (3) TINT DIRECTION was RE-VERIFIED, not just re-guessed, after Sun-kissed (pre-swap naming -- see _tuningNoteRound3) rendered green/olive instead of warm/amber: a throwaway CoreImage script re-ran the exact neutral-gray test from the first tuning pass and confirmed the SIGN is still correct (negative targetNeutral.y is magenta in this fixed-neutral-6500 configuration, consistently, on neutral gray AND several plausible non-neutral photo-like base colors). The bug was MAGNITUDE, not direction: the first pass's 1:1 pass-through of Lightroom's small tint numbers (+8/+4/+7) into CITemperatureAndTint's own tint units was never actually validated the way temperature's mired conversion was -- a parameter sweep against a plausible warm-toned base color showed roughly 4x the original magnitude was needed before the result read reliably warm rather than olive. Values here are that estimate (unlike temperature's mired math, this one is NOT independently derived from a documented conversion factor -- treat as a starting point, confirm on-device).",
+  "_tuningNoteRound3": "TWO more changes after the second on-device pass. (1) SOFT GLOW READ AS A FLAT WHITE OVERLAY, not a highlight-concentrated glow -- diagnosed as NOT a bloom bug (a throwaway CoreImage script built a synthetic night scene -- dark sky, a mid-bright monument, small bright streetlights -- and confirmed CIBloom itself IS properly luminance-gated: a deep-sky sample point far from any bright content moved by ~0 regardless of bloom's radius/intensity). The actual cause was upstream, in colorControls, and had TWO parts: (a) CIColorControls' `contrast` has a strongly non-linear, disproportionate SHADOW-LIFTING effect for any value below 1.0 -- empirically, contrast=0.99 alone (a nominal 1% reduction) already lifted a near-black test pixel from 8/255 to 21/255, and Soft Glow's -22%-Lightroom-derived value of 0.78 lifted it to 94/255; this is NOT the simple '(x-0.5)*contrast+0.5' pivot the first pass's linear conversion assumed. (b) colorControls' `brightness` (the EV-derived additive shift, Soft Glow's is the largest and most positive of the three variants) compounds this further once fed into toneCurve's own steep near-origin slope -- isolated testing showed brightness alone added roughly 85/255 to the same near-black pixel, more than contrast's own contribution. Fixed by bringing Soft Glow's contrast much closer to neutral (0.78 -> 0.98) and dropping its brightness contribution entirely (0.1156 -> 0.0) -- the reference's own tone curve (point0 already ~0.07, reading as ~26/255 after CIToneCurve's own spline overshoot) already provides a well-behaved, appropriately-gentle lift on its own; colorControls' contrast/brightness were compounding on top of it rather than adding anything the curve didn't already express. Verified: deep sky now reads ~44/255 both before and after bloom (bloom's own marginal contribution there is ~0, confirming it as luminance-gated once the upstream wash is fixed), while a lit monument/streetlight area lifts substantially more -- glow now concentrates where it should. Sun-kissed and Warm Film were NOT touched -- their brightness/contrast values are already close to neutral (or negative), so this compounding never applied to them. bloom's own amount (radius/intensity) is UNCHANGED -- per instruction, the mechanism was fixed first; amount tuning is a separate, later pass. (2) SUN-KISSED AND WARM FILM WERE SWAPPED: the op VALUES were correct for each look, just attached to the wrong name/position. What's now variants[0] 'Sun-kissed' is the parameter set that used to be named 'Warm Film' (temperature 5623/tint -16/etc.); what's now variants[1] 'Warm Film' is the parameter set that used to be named 'Sun-kissed' (temperature 5752/tint -32/etc., including the tint-magnitude fix from _tuningNoteRound2 note 3, which is unaffected by the rename since it's a property of the VALUES, not the name). Checked for index-vs-name assumptions elsewhere in the codebase before swapping -- none found beyond the deliberate, name-agnostic 'variants[0] is whatever's pre-selected on arrival and leads the showcase' convention (EditFlowView, CurationSequenceView), which is exactly why variant order (not just the name field) needed to move too.",
   "id": "golden_hour",
   "displayName": "Golden Hour",
   "variants": [
     {
       "name": "Sun-kissed",
-      "ops": [
-        { "type": "temperatureTint", "temperature": 5752, "tint": -32 },
-        { "type": "colorControls", "saturation": 1.04, "brightness": -0.0069, "contrast": 0.99 },
-        { "type": "vibrance", "amount": 0.14 },
-        { "type": "toneCurve", "points": [
-          [0,      0.0471],
-          [0.251,  0.2275],
-          [0.502,  0.4863],
-          [0.749,  0.7529],
-          [1,      0.9333]
-        ] },
-        { "type": "vignette", "intensity": 0.08, "radius": 1.4 },
-        { "type": "bloom", "radius": 39.7, "intensity": 0.14 },
-        { "type": "grain", "intensity": 0.012, "size": 1.0 }
-      ]
-    },
-    {
-      "name": "Warm Film",
       "ops": [
         { "type": "temperatureTint", "temperature": 5623, "tint": -16 },
         { "type": "colorControls", "saturation": 0.96, "brightness": -0.0647, "contrast": 1.05 },
@@ -42,10 +25,28 @@
       ]
     },
     {
+      "name": "Warm Film",
+      "ops": [
+        { "type": "temperatureTint", "temperature": 5752, "tint": -32 },
+        { "type": "colorControls", "saturation": 1.04, "brightness": -0.0069, "contrast": 0.99 },
+        { "type": "vibrance", "amount": 0.14 },
+        { "type": "toneCurve", "points": [
+          [0,      0.0471],
+          [0.251,  0.2275],
+          [0.502,  0.4863],
+          [0.749,  0.7529],
+          [1,      0.9333]
+        ] },
+        { "type": "vignette", "intensity": 0.08, "radius": 1.4 },
+        { "type": "bloom", "radius": 39.7, "intensity": 0.14 },
+        { "type": "grain", "intensity": 0.012, "size": 1.0 }
+      ]
+    },
+    {
       "name": "Soft Glow",
       "ops": [
         { "type": "temperatureTint", "temperature": 6030, "tint": -28 },
-        { "type": "colorControls", "saturation": 0.93, "brightness": 0.1156, "contrast": 0.78 },
+        { "type": "colorControls", "saturation": 0.93, "brightness": 0.0, "contrast": 0.98 },
         { "type": "vibrance", "amount": 0.05 },
         { "type": "toneCurve", "points": [
           [0,      0.0706],

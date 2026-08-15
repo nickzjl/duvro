@@ -217,15 +217,17 @@ struct VibePackTests {
         // through CGPoint's Codable conformance (the exact thing that broke
         // on device when the JSON used {"x":...,"y":...} objects instead).
         // Index 3, not 1 -- toneCurve now runs fourth in the reordered
-        // chain. x-values are Sun-kissed's own tuned points (64/128/191 out
-        // of 255, not the untuned pack's exact quarter-points) -- not [0,
-        // 0.25, 0.5, 0.75, 1] anymore.
+        // chain. x-values are variants[0]'s own tuned points -- since the
+        // Sun-kissed/Warm Film swap (round 3), variants[0] "Sun-kissed"
+        // holds what used to be Warm Film's curve (its own x-values, from
+        // 192/255 not 191/255 -- see golden_hour.json's _tuningNoteRound3),
+        // not [0, 0.25, 0.5, 0.75, 1].
         guard case .toneCurve(let points) = pack.variants[0].ops[3] else {
             Issue.record("expected variants[0].ops[3] to be .toneCurve")
             return
         }
         #expect(points.count == 5)
-        #expect(points.map(\.x) == [0, 0.251, 0.502, 0.749, 1])
+        #expect(points.map(\.x) == [0, 0.251, 0.502, 0.7529, 1])
     }
 
     // Phase 8, Task 2: same reasoning as goldenHourLoadsFromTheAppBundle
