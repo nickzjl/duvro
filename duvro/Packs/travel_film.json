@@ -1,60 +1,36 @@
 {
-  "_note": "UNTUNED. Rough, plausible starting parameters only -- nobody has seen these rendered yet. Do not treat as final; see BUILD_ROADMAP's Deferred work register (\"Digicam/Travel Film pack tuning\"). Values will be replaced from rendered output on a real device, same as golden_hour.json -- do NOT adjust Golden Hour while tuning this file.",
   "_schemaNote": "toneCurve points are [x, y] pairs, e.g. [0.25, 0.24] -- NOT {\"x\":...,\"y\":...} objects. See golden_hour.json's _schemaNote for the device bug this avoids.",
+  "_tuningNote": "TUNED from hand-graded Lightroom reference values, same conversion methodology as digicam.json's own _tuningNote (EV->brightness mid-gray anchor, 1:1 saturation/vibrance, mired-space temperature, 4x tint multiplier, fade dropped as redundant with each tone curve's own point0, bloom radius-as-percent-of-width -> pixels against 1280px) -- see that file for the full formula list, not repeated here. colorControls.contrast/brightness are 1.0/0.0 (neutral) for every variant, same empirically-justified reason as digicam.json's _tuningNoteContrast -- this also absorbs FADED POSTCARD's reference value 'Brightness +9' (a different unit than the 'Exposure X EV' used everywhere else, and ambiguous on its own), since it would have been neutralized by that policy regardless of how it converted; the tone curve's own point0 (0.1294, matching 'Faded blacks +33/255') carries the shadow lift instead, and a throwaway CoreImage script confirmed a small nonzero brightness attempt here specifically overshot that intended point0 by roughly 2x once chained through colorControls before toneCurve, the same compounding pattern Golden Hour's Soft Glow hit. DEEP TEAL's green tint direction (targetNeutral.y = +20, opposite sign from every magenta-tinted variant in both packs) was verified the same way as digicam.json's Y2K cool-direction check: a throwaway script compared y=+20 against y=-20 on a neutral gray base at the same fixed Kelvin -- +20 produces a clearly green-dominant channel (G highest of the three), -20 the expected magenta (R and B both elevated over G, matching Golden Hour's own established direction), confirming the sign split is correct rather than assumed.",
+  "_tuningNoteScales": "TWO variants needed an explicit scale interpretation, both flagged as such rather than picked silently. KODAK STYLE's reference tone curve (0,4)(25,36)(50,84)(75,138)(90,179)(100,240) gives 0-100 x-inputs but y-outputs running past 100 up to 240 -- read as 0-255 outputs against 0-100-percent inputs (x/100, y/255), which produces a coherent, monotonic curve; the alternative (both axes 0-100, values >100 clamped) would flatten the whole upper half of the curve into a single clipped point, which reads as clearly wrong rather than ambiguous. FADED POSTCARD's reference curve gives its FIRST point (0->33) in the same 0-255 units as the variant's own 'Faded blacks +33/255' figure, then every remaining point (25->31, 50->54, 75->71, 90->84, 100->96) as 0-100 percentages on both axes -- read literally as stated (point0 via /255, the rest via /100 on both axes), which lines up with the reference's own prose description ('~13% black lift... highlight compression starting around 72%') almost exactly against the resulting normalized points. Tone curve point reduction (7/6/6/9 points down to CIToneCurve's required 5) followed Golden Hour's own methodology throughout: keep both endpoints plus 3 interior points chosen to be close to a straight-line interpolation of their surviving neighbors -- Kodak Style dropped its 90% point (closest of the four interior candidates to the endpoint, so least informative -- straight-line-fit deviation ~0.08 vs ~0.02-0.03 for the other candidates); Faded Postcard dropped its 90% point for the same reason (deviation ~0.02 either way, 90% narrowly preferred for the same closest-to-endpoint logic); Deep Teal (9 points) kept the four nearest 1/4, 1/2, 3/4 and dropped the four in between (deviations all under 0.01, an unusually clean fit).",
   "id": "travel_film",
   "displayName": "Travel Film",
   "variants": [
-    {
-      "name": "Kodak Style",
-      "ops": [
-        { "type": "temperatureTint", "temperature": 5300, "tint": 5 },
-        { "type": "toneCurve", "points": [
-          [0,    0.01],
-          [0.25, 0.22],
-          [0.5,  0.52],
-          [0.75, 0.80],
-          [1,    0.99]
-        ] },
-        { "type": "colorControls", "saturation": 1.3, "brightness": 0.02, "contrast": 1.15 },
-        { "type": "vignette", "intensity": 0.15, "radius": 1.5 },
-        { "type": "grain", "intensity": 0.07, "size": 1.1 },
-        { "type": "fade", "amount": 0.05 }
-      ]
-    },
-    {
-      "name": "Faded Postcard",
-      "ops": [
-        { "type": "temperatureTint", "temperature": 5600, "tint": 2 },
-        { "type": "toneCurve", "points": [
-          [0,    0.12],
-          [0.25, 0.30],
-          [0.5,  0.55],
-          [0.75, 0.72],
-          [1,    0.90]
-        ] },
-        { "type": "colorControls", "saturation": 0.7, "brightness": 0.05, "contrast": 0.75 },
-        { "type": "vignette", "intensity": 0.08, "radius": 1.7 },
-        { "type": "grain", "intensity": 0.04, "size": 1.4 },
-        { "type": "fade", "amount": 0.35 }
-      ]
-    },
-    {
-      "name": "Deep Teal",
-      "ops": [
-        { "type": "temperatureTint", "temperature": 6800, "tint": -8 },
-        { "type": "toneCurve", "points": [
-          [0,    0.0],
-          [0.25, 0.20],
-          [0.5,  0.48],
-          [0.75, 0.78],
-          [1,    0.98]
-        ] },
-        { "type": "colorControls", "saturation": 1.15, "brightness": -0.02, "contrast": 1.2 },
-        { "type": "vignette", "intensity": 0.3, "radius": 1.2 },
-        { "type": "bloom", "radius": 6, "intensity": 0.15 },
-        { "type": "grain", "intensity": 0.05, "size": 1.0 },
-        { "type": "fade", "amount": 0.08 }
-      ]
-    }
+    { "name": "Kodak Style", "ops": [
+      { "type": "temperatureTint", "temperature": 5352, "tint": -20 },
+      { "type": "colorControls", "saturation": 1.12, "brightness": 0.0, "contrast": 1.0 },
+      { "type": "vibrance", "amount": 0.20 },
+      { "type": "toneCurve", "points": [[0,0.0157],[0.25,0.1412],[0.50,0.3294],[0.75,0.5412],[1,0.9412]] },
+      { "type": "vignette", "intensity": 0.07, "radius": 1.4 },
+      { "type": "bloom", "radius": 47.36, "intensity": 0.15 },
+      { "type": "grain", "intensity": 0.20, "size": 1.2 }
+    ]},
+    { "name": "Faded Postcard", "ops": [
+      { "type": "temperatureTint", "temperature": 5752, "tint": -20 },
+      { "type": "colorControls", "saturation": 0.79, "brightness": 0.0, "contrast": 1.0 },
+      { "type": "vibrance", "amount": -0.13 },
+      { "type": "toneCurve", "points": [[0,0.1294],[0.25,0.31],[0.50,0.54],[0.75,0.71],[1,0.96]] },
+      { "type": "vignette", "intensity": 0.09, "radius": 1.6 },
+      { "type": "bloom", "radius": 61.44, "intensity": 0.17 },
+      { "type": "grain", "intensity": 0.23, "size": 1.3 }
+    ]},
+    { "name": "Deep Teal", "ops": [
+      { "type": "temperatureTint", "temperature": 7151, "tint": 20 },
+      { "type": "colorControls", "saturation": 1.10, "brightness": 0.0, "contrast": 1.0 },
+      { "type": "vibrance", "amount": 0.20 },
+      { "type": "toneCurve", "points": [[0,0.0118],[0.2510,0.1686],[0.5020,0.4118],[0.7529,0.7059],[1,0.9882]] },
+      { "type": "vignette", "intensity": 0.16, "radius": 1.2 },
+      { "type": "bloom", "radius": 44.8, "intensity": 0.13 },
+      { "type": "grain", "intensity": 0.12, "size": 1.0 }
+    ]}
   ]
 }
