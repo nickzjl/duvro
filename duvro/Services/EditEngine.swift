@@ -520,13 +520,42 @@ nonisolated enum EditEngine {
         }
     }
 
+    /// Named, tunable constants for applyLightLeak's spatial look, pulled
+    /// out of inline magic numbers during Digicam/Travel Film tuning per
+    /// explicit instruction ("put the colour, edge, falloff distance and
+    /// peak intensity in named parameters"). `corner` (WHICH edge/corner)
+    /// already lived as the op's own JSON parameter -- these three are the
+    /// rest: WHAT the leak looks like once it's radiating from that corner.
+    /// Not JSON-exposed (unlike corner/intensity) because nothing here
+    /// needs to vary per-pack the way a specific pack's corner choice does
+    /// -- these define "a light leak" as a look, the same way
+    /// grainNoiseContrast defines "grain" as a look.
+    private enum LightLeakLook {
+        /// Classic warm film-burn red-orange.
+        static let red: CGFloat = 1.0
+        static let green: CGFloat = 0.42
+        static let blue: CGFloat = 0.12
+        /// How far the leak reaches into the frame, as a fraction of the
+        /// image's longest edge -- tuned to the reference's "fading across
+        /// roughly 25-35% of the frame" (the range's midpoint). The old
+        /// 0.85 (85% of the longest edge) was most of the whole photo, not
+        /// a corner-localized leak.
+        static let falloffFraction: CGFloat = 0.30
+        /// `intensity` from the pack's own JSON is clamped into this range
+        /// rather than passed straight through, so a pack author can't
+        /// blow out the corner past what still reads as photographic --
+        /// tuned to the reference's "peaking around 30-40% intensity."
+        static let minPeakAlpha: CGFloat = 0.30
+        static let maxPeakAlpha: CGFloat = 0.40
+    }
+
     /// Warm red-orange glare radiating from one corner -- a radial
     /// gradient, screen-blended so it can only brighten (never darken,
-    /// unlike vignette). `intensity` is the gradient's peak alpha at its
-    /// origin; radius is a fixed proportion of the image's longest edge
-    /// (Digicam's own JSON is the only tuning knob this session -- see
-    /// BUILD_ROADMAP's Deferred work register, "Digicam/Travel Film pack
-    /// tuning," matching Golden Hour's own untuned status).
+    /// unlike vignette). `intensity` (the pack's own JSON value, 0...1-ish
+    /// like every other op) is clamped into LightLeakLook's peak-alpha
+    /// range rather than passed straight through -- see that enum's doc
+    /// comment. Color and falloff distance are also LightLeakLook
+    /// constants now, not inline literals.
     private static func applyLightLeak(intensity: Double, corner: String, to image: CIImage) -> CIImage? {
         guard intensity > 0 else { return image }
         let extent = image.extent
@@ -536,10 +565,10 @@ nonisolated enum EditEngine {
         let gradient = CIFilter.radialGradient()
         gradient.center = origin
         gradient.radius0 = 0
-        gradient.radius1 = Float(max(extent.width, extent.height)) * 0.85
-        let peakAlpha = CGFloat(min(max(intensity, 0), 1))
-        gradient.color0 = CIColor(red: 1.0, green: 0.45, blue: 0.15, alpha: peakAlpha)
-        gradient.color1 = CIColor(red: 1.0, green: 0.45, blue: 0.15, alpha: 0)
+        gradient.radius1 = Float(max(extent.width, extent.height)) * Float(LightLeakLook.falloffFraction)
+        let peakAlpha = min(max(CGFloat(intensity), LightLeakLook.minPeakAlpha), LightLeakLook.maxPeakAlpha)
+        gradient.color0 = CIColor(red: LightLeakLook.red, green: LightLeakLook.green, blue: LightLeakLook.blue, alpha: peakAlpha)
+        gradient.color1 = CIColor(red: LightLeakLook.red, green: LightLeakLook.green, blue: LightLeakLook.blue, alpha: 0)
         guard let gradientImage = gradient.outputImage?.cropped(to: extent) else { return nil }
 
         let blend = CIFilter.screenBlendMode()

@@ -1,53 +1,39 @@
 {
-  "_note": "UNTUNED. Rough, plausible starting parameters only -- nobody has seen these rendered yet. Do not treat as final; see BUILD_ROADMAP's Deferred work register (\"Digicam/Travel Film pack tuning\"). Values will be replaced from rendered output on a real device, same as golden_hour.json -- do NOT adjust Golden Hour while tuning this file.",
   "_schemaNote": "toneCurve points are [x, y] pairs, e.g. [0.25, 0.24] -- NOT {\"x\":...,\"y\":...} objects. See golden_hour.json's _schemaNote for the device bug this avoids.",
+  "_tuningNote": "TUNED from hand-graded Lightroom reference values. Conversions, matching golden_hour.json's own methodology: EV->brightness via a mid-gray anchor (0.5*(2^EV-1)); LR Saturation/Vibrance percent -> CIColorControls.saturation / CIVibrance.amount at 1:1 (1.0+LR/100, LR/100); temperature as a mired-space delta against the fixed 6500K/tint-0 baseline (positive LR Temperature = warm = LOWER resulting Kelvin, confirmed empirically, same direction as Golden Hour); tint at 4x LR's raw number (Golden Hour's empirically-found multiplier) with NEGATIVE targetNeutral.y = magenta / POSITIVE = green (re-confirmed empirically this session, see _tuningNoteContrast for Y2K's cool-direction and Deep Teal-equivalent-in-travel_film's green-direction checks); vignette radius and grain size are NOT given by the reference (only intensity numbers) -- chosen to match Golden Hour's own established range (radius 1.2-1.6) and each variant's aesthetic (grain size finer for Y2K's digital-sensor look, coarser for film-like Polaroid/Light Leak), flagged as interpretation. 'Faded blacks' was checked against each variant's own tone-curve black point (point0) and found numerically identical in all three variants (same data given twice) -- fade is dropped from every chain, as in Golden Hour. Bloom radius-as-percent-of-width converted to pixels against the 1280px preview reference width, matching Golden Hour.",
+  "_tuningNoteContrast": "colorControls.contrast and .brightness are 1.0/0.0 (neutral, no-op) for EVERY variant in this pack, NOT a converted LR value. This is a deliberate, empirically-verified choice: a fresh CIColorControls.contrast sweep this session (both directions, not just reductions like Golden Hour's own round-3 check) confirmed contrast is non-linear enough that even a SMALL deviation from 1.0 shifts the tone curve's effective black/white points once colorControls runs before toneCurve (the established correct op order) -- e.g. a damped ~1:10 LR-contrast conversion (the gentlest scale tried) still measurably shifted a variant's near-black output away from its tone curve's own intended point0. Rather than re-deriving a separate damping constant per variant, this pack follows Golden Hour Soft Glow's own resolution directly: colorControls' contrast/brightness are neutralized and EVERY variant's 5-point tone curve (built straight from that variant's own reference tone-curve values, which already encode its real contrast/exposure character) carries 100% of the tonal shaping. Y2K Digicam's cool direction (temperature 8275K, tint -20, against the 6500K/tint-0 baseline) was verified with a throwaway CoreImage script on both a neutral gray and a warm photo-like base color -- the blue channel measurably exceeds red in both cases, confirming it renders cooler, not warmer, despite the counter-intuitive mired-space sign (matching Golden Hour's own established, re-verified-here direction).",
   "id": "digicam",
   "displayName": "Digicam",
   "variants": [
-    {
-      "name": "Light Leak",
-      "ops": [
-        { "type": "temperatureTint", "temperature": 5400, "tint": 4 },
-        { "type": "toneCurve", "points": [
-          [0,    0.04],
-          [0.25, 0.25],
-          [0.5,  0.53],
-          [0.75, 0.79],
-          [1,    0.97]
-        ] },
-        { "type": "colorControls", "saturation": 1.1, "brightness": 0.02, "contrast": 1.05 },
-        { "type": "vignette", "intensity": 0.18, "radius": 1.4 },
-        { "type": "lightLeak", "intensity": 0.55, "corner": "topTrailing" },
-        { "type": "grain", "intensity": 0.08, "size": 1.2 },
-        { "type": "fade", "amount": 0.10 }
-      ]
-    },
-    {
-      "name": "Polaroid",
-      "ops": [
-        { "type": "colorControls", "saturation": 0.95, "brightness": 0.03, "contrast": 0.95 },
-        { "type": "toneCurve", "points": [
-          [0,    0.10],
-          [0.25, 0.28],
-          [0.5,  0.54],
-          [0.75, 0.74],
-          [1,    0.92]
-        ] },
-        { "type": "vignette", "intensity": 0.10, "radius": 1.6 },
-        { "type": "grain", "intensity": 0.05, "size": 1.0 },
-        { "type": "fade", "amount": 0.15 },
-        { "type": "polaroidFrame", "borderWidth": 0.07, "bottomBorderMultiplier": 3.2 }
-      ]
-    },
-    {
-      "name": "Y2K Digicam",
-      "ops": [
-        { "type": "temperatureTint", "temperature": 7200, "tint": -3 },
-        { "type": "colorControls", "saturation": 1.3, "brightness": 0.0, "contrast": 1.15 },
-        { "type": "vignette", "intensity": 0.15, "radius": 1.3 },
-        { "type": "grain", "intensity": 0.03, "size": 0.7 },
-        { "type": "dateStamp", "corner": "bottomTrailing", "scale": 0.035 }
-      ]
-    }
+    { "name": "Light Leak", "ops": [
+      { "type": "temperatureTint", "temperature": 5439, "tint": -36 },
+      { "type": "colorControls", "saturation": 1.08, "brightness": 0.0, "contrast": 1.0 },
+      { "type": "vibrance", "amount": 0.10 },
+      { "type": "toneCurve", "points": [[0,0.0706],[0.2510,0.2275],[0.5020,0.4431],[0.7529,0.6706],[1,0.8863]] },
+      { "type": "vignette", "intensity": 0.07, "radius": 1.3 },
+      { "type": "bloom", "radius": 44.8, "intensity": 0.11 },
+      { "type": "lightLeak", "intensity": 0.35, "corner": "topTrailing" },
+      { "type": "grain", "intensity": 0.26, "size": 1.1 }
+    ]},
+    { "name": "Polaroid", "ops": [
+      { "type": "temperatureTint", "temperature": 7050, "tint": -16 },
+      { "type": "colorControls", "saturation": 0.93, "brightness": 0.0, "contrast": 1.0 },
+      { "type": "vibrance", "amount": -0.03 },
+      { "type": "toneCurve", "points": [[0,0.0588],[0.2510,0.2627],[0.5020,0.5098],[0.7529,0.7216],[1,0.9373]] },
+      { "type": "vignette", "intensity": 0.06, "radius": 1.5 },
+      { "type": "bloom", "radius": 25.6, "intensity": 0.05 },
+      { "type": "grain", "intensity": 0.24, "size": 1.0 },
+      { "type": "polaroidFrame", "borderWidth": 0.07, "bottomBorderMultiplier": 3.2 }
+    ]},
+    { "name": "Y2K Digicam", "ops": [
+      { "type": "temperatureTint", "temperature": 8275, "tint": -20 },
+      { "type": "colorControls", "saturation": 1.08, "brightness": 0.0, "contrast": 1.0 },
+      { "type": "vibrance", "amount": 0.19 },
+      { "type": "toneCurve", "points": [[0,0],[0.30,0.20],[0.50,0.44],[0.70,0.74],[1,1]] },
+      { "type": "vignette", "intensity": 0.12, "radius": 1.2 },
+      { "type": "bloom", "radius": 102.4, "intensity": 0.26 },
+      { "type": "grain", "intensity": 0.32, "size": 0.8 },
+      { "type": "dateStamp", "corner": "bottomTrailing", "scale": 0.035 }
+    ]}
   ]
 }
