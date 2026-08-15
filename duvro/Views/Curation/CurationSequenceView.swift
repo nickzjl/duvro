@@ -521,10 +521,17 @@ struct CurationSequenceView: View {
     }
 
     private func runRealWork() async {
-        // Wait for scoring to actually finish (or, every DEBUG launch
-        // path: it already has -- see file header) before running
-        // selection against the FULL score set, never a partial one.
-        while sessionStore.isScoring {
+        // Wait for import AND scoring to actually finish (or, every
+        // DEBUG launch path: both already have -- see file header)
+        // before running selection against the FULL score set, never a
+        // partial one. `isImporting` matters now that the picker's
+        // dismiss goes straight to vibe selection (ImportView) instead
+        // of waiting behind the old grid/"choose your vibe" tap -- this
+        // view can now be reached while import itself is still running,
+        // before scoring has even been kicked off, and checking
+        // isScoring alone would read false during that window too (not
+        // because the pipeline was done, but because it hadn't started).
+        while sessionStore.isImporting || sessionStore.isScoring {
             try? await Task.sleep(for: .milliseconds(100))
         }
 

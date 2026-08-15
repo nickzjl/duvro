@@ -93,6 +93,13 @@ struct ImportView: View {
     /// reaching this screen has nothing to curate from yet. Surfaced
     /// rather than silently doing nothing or crashing.
     @State private var vibeSelectBlockedMessage: String?
+    /// The picker's own selection count, checked the instant it returns --
+    /// see `isPickerPresented`'s sheet below for why this replaced the
+    /// minimum-photos check that used to live in `continueButton`'s
+    /// visibility (grid's own safeAreaInset gate). Set only when the user
+    /// picked fewer than `minimumPhotos`; the alert offers a way straight
+    /// back into the picker rather than stranding them on an empty screen.
+    @State private var tooFewPhotosMessage: String?
 
     #if DEBUG
     @State private var showScoringGrid = false
@@ -171,11 +178,43 @@ struct ImportView: View {
         .sheet(isPresented: $isPickerPresented) {
             PhotoPicker(selectionLimit: maximumPhotos) { results in
                 isPickerPresented = false
+                // Checked on `results` (the picker's own return value)
+                // rather than after import/downsampling -- available the
+                // instant the picker returns, no need to wait on
+                // PhotoImportService at all for a count that's already
+                // known. Below the floor: don't start importing anything,
+                // surface it, offer a straight line back into the picker.
+                guard results.count >= minimumPhotos else {
+                    tooFewPhotosMessage = "pick at least \(minimumPhotos) photos to start — you selected \(results.count)."
+                    return
+                }
                 Task {
                     await importService.process(results: results)
                 }
+                // No grid, no "choose your vibe" tap, no processing
+                // screen -- the picker dismissing goes straight to vibe
+                // selection; import and (once import finishes) scoring
+                // both continue underneath while the user browses packs,
+                // same background-work pattern scoring already used on
+                // its own. Same defensive reset continueButton's action
+                // used to do, now run here instead since this replaces it
+                // as the real entry into the flow.
+                realFlowPack = nil
+                curationComplete = false
+                showFinalReviewReal = false
+                showHandoffReal = false
+                showVibeSelect = true
             }
             .ignoresSafeArea()
+        }
+        .alert("a few more needed", isPresented: Binding(
+            get: { tooFewPhotosMessage != nil },
+            set: { if !$0 { tooFewPhotosMessage = nil } }
+        )) {
+            Button("pick again") { isPickerPresented = true }
+            Button("cancel", role: .cancel) {}
+        } message: {
+            Text(tooFewPhotosMessage ?? "")
         }
         // Mirrors importService.photos into sessionStore as it grows, so
         // the grid stays live/progressive during import (Photo isn't
@@ -198,6 +237,14 @@ struct ImportView: View {
         .onChange(of: scoringService.isScoring) { _, inProgress in
             sessionStore.setScoring(inProgress)
         }
+        // Mirrors importService.isImporting the same way scoring's own
+        // flag is mirrored above -- CurationSequenceView's wait loop
+        // needs this now that it can be reached while import itself is
+        // still running (picker-dismiss goes straight there; see the
+        // picker's own sheet closure above), not just while scoring is.
+        .onChange(of: importService.isImporting) { _, inProgress in
+            sessionStore.setImporting(inProgress)
+        }
         // Task 1 (BUILD_ROADMAP Known gotchas item 9): scoring starts on
         // its own, in the background, the moment import finishes -- the
         // user goes straight to vibe selection and browses pack previews
@@ -213,6 +260,17 @@ struct ImportView: View {
             guard wasImporting, !isImportingNow else { return }
             guard importService.photos.count >= minimumPhotos, !hasStartedAutoScoring else { return }
             hasStartedAutoScoring = true
+            // Set synchronously, BEFORE the Task below even launches --
+            // closes a real gap: scoringService.isScoring only flips
+            // (and mirrors into sessionStore via the onChange above)
+            // once score(photos:) itself starts running, one or more
+            // scheduling hops after this line. CurationSequenceView's
+            // wait loop polls sessionStore.isImporting/isScoring every
+            // 100ms; without this, a poll landing in that gap would see
+            // BOTH false -- not because the pipeline was done, but
+            // because scoring hadn't started yet -- and run selection
+            // against an empty score set.
+            sessionStore.setScoring(true)
             Task { await scoringService.score(photos: importService.photos) }
         }
         #if DEBUG
@@ -409,9 +467,18 @@ struct ImportView: View {
         // scores may be PARTIALLY populated (or even still empty, if
         // scoring only just started) without that meaning there's
         // nothing to curate -- CurationSequenceView waits for scoring to
-        // actually finish before running selection. Only block if
-        // there's truly nothing scored AND nothing scoring.
-        guard !sessionStore.scores.isEmpty || sessionStore.isScoring else {
+        // actually finish before running selection. `||
+        // importService.isImporting`: the picker dismissing now goes
+        // straight to vibe selection (see the picker's own sheet closure
+        // above) instead of waiting behind the old grid/"choose your
+        // vibe" tap, so a fast tap-through here can land while import
+        // itself is still running, before scoring has even been kicked
+        // off -- still not "nothing to curate," just not ready yet.
+        // CurationSequenceView's own wait-for-scoring loop covers both
+        // cases identically once it starts running. Only block if
+        // there's truly nothing scored, nothing scoring, AND nothing
+        // still importing.
+        guard !sessionStore.scores.isEmpty || sessionStore.isScoring || importService.isImporting else {
             vibeSelectBlockedMessage = "add some photos and score them first — there's nothing to curate yet."
             return
         }

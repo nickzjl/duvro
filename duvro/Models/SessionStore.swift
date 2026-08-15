@@ -37,6 +37,17 @@ final class SessionStore {
     /// all -- see ScoringService's failedCount) -- which is EVERY photo,
     /// every time, in the Simulator.
     private(set) var isScoring: Bool = false
+    /// Mirrors PhotoImportService.isImporting (real flow only), same
+    /// pattern and same reason as `isScoring` above -- added when the
+    /// picker's own dismiss started going straight to vibe selection
+    /// instead of waiting behind the old grid/"choose your vibe" tap, so
+    /// CurationSequenceView can now be reached while import itself is
+    /// still running, before scoring has even been kicked off. Without
+    /// this, its wait-for-scoring loop (which only checked isScoring)
+    /// would see `false` during that window -- not because scoring had
+    /// finished, but because it hadn't started yet -- and run selection
+    /// against an empty score set.
+    private(set) var isImporting: Bool = false
     private(set) var shortlist: ShortlistResult?
     /// The chosen post, as FallbackSelectionService (or, once it exists,
     /// the curation call) first proposed it -- immutable record of that
@@ -81,6 +92,10 @@ final class SessionStore {
 
     func setScoring(_ inProgress: Bool) {
         isScoring = inProgress
+    }
+
+    func setImporting(_ inProgress: Bool) {
+        isImporting = inProgress
     }
 
     func setShortlist(_ shortlist: ShortlistResult) {
