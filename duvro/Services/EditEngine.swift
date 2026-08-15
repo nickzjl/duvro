@@ -429,15 +429,39 @@ nonisolated enum EditEngine {
         return filter.outputImage
     }
 
+    /// Fixed contrast push on the raw noise, independent of `intensity` --
+    /// see applyGrain's own doc comment for why this used to be `1 +
+    /// intensity * 3` and that was the bug.
+    private static let grainNoiseContrast: Float = 2.0
+
     /// No single built-in CIFilter is "grain" -- this composites
-    /// CIRandomGenerator noise over the image. Rough/plausible, matching
-    /// this session's scope (Golden Hour's actual look is untuned; see the
-    /// Deferred work register): desaturate the noise, push its contrast by
-    /// `intensity` so it reads as luminance grain rather than color
-    /// confetti, scale it by `size` before cropping back down (crop
-    /// resamples, so a larger scale reads as coarser/bigger grain), then
-    /// blend over the base image with soft-light so it darkens and
-    /// lightens rather than flatly overlaying.
+    /// CIRandomGenerator noise over the image: desaturate it (luminance
+    /// grain, not color confetti), scale it by `size` before cropping back
+    /// down (crop resamples, so a larger scale reads as coarser/bigger
+    /// grain), soft-light blend it over the base for the darken/lighten
+    /// texture a flat overlay wouldn't have, then -- the part that was
+    /// missing -- blend the RESULT back toward the original image by
+    /// `intensity`, using the same alpha-blend helper the advanced sheet's
+    /// intensity slider already uses.
+    ///
+    /// BUG FOUND ON DEVICE (Golden Hour tuning, second pass): grain was
+    /// roughly 10x too strong at every intensity, visible even on flat sky.
+    /// `intensity` used to control ONLY the noise's own internal contrast
+    /// (`1 + intensity * 3`) -- the soft-light blend below it was ALWAYS
+    /// composited at full strength, with no opacity/amount control at all.
+    /// CIRandomGenerator produces full-amplitude uniform noise (each
+    /// channel independently random across the ENTIRE 0-1 range) -- even
+    /// at intensity's lowest useful values, contrast staying close to its
+    /// unmodified baseline still means near-maximum-amplitude noise gets
+    /// blended at 100% strength every time. There was no numeric value of
+    /// `intensity` that could make this subtle, because nothing in the
+    /// chain ever reduced how much of the noise layer showed through --
+    /// only how contrasty that (always fully visible) layer was. Fixed by
+    /// giving the noise a FIXED, moderate contrast (grainNoiseContrast,
+    /// enough for it to read as texture once actually attenuated) and
+    /// making `intensity` control real blend opacity via `blend(_:toward:)`
+    /// instead -- the same technique already used for the advanced sheet's
+    /// intensity control, not a new mechanism.
     private static func applyGrain(intensity: Double, size: Double, to image: CIImage) -> CIImage? {
         guard intensity > 0 else { return image }
         let extent = image.extent
@@ -449,13 +473,15 @@ nonisolated enum EditEngine {
         let mono = CIFilter.colorControls()
         mono.inputImage = scaled
         mono.saturation = 0
-        mono.contrast = Float(1 + intensity * 3)
-        guard let monoOutput = mono.outputImage else { return nil }
+        mono.contrast = grainNoiseContrast
+        guard let monoOutput = mono.outputImage?.cropped(to: extent) else { return nil }
 
-        let blend = CIFilter.softLightBlendMode()
-        blend.inputImage = monoOutput.cropped(to: extent)
-        blend.backgroundImage = image
-        return blend.outputImage?.cropped(to: extent)
+        let softLight = CIFilter.softLightBlendMode()
+        softLight.inputImage = monoOutput
+        softLight.backgroundImage = image
+        guard let fullStrengthGrain = softLight.outputImage?.cropped(to: extent) else { return nil }
+
+        return blend(fullStrengthGrain, toward: image, amount: min(max(intensity, 0), 1))
     }
 
     /// No single built-in CIFilter is "fade" either -- a classic lifted-

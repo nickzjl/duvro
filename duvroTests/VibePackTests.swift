@@ -197,13 +197,17 @@ struct VibePackTests {
         #expect(pack.variants.map(\.name) == ["Sun-kissed", "Warm Film", "Soft Glow"])
 
         // Every variant has the full 7-op Golden Hour chain, in order --
-        // updated when Golden Hour was tuned from a hand-graded reference:
-        // fade was dropped (its "faded blacks" value turned out to be the
-        // same data as the tone curve's own black point, applying both
-        // would double-lift shadows -- see golden_hour.json's own
-        // _tuningNote) and vibrance was added (no colorControls equivalent
-        // -- see EditOp.swift).
-        let expectedOpOrder: [String] = ["temperatureTint", "toneCurve", "vibrance", "colorControls", "vignette", "bloom", "grain"]
+        // reordered a second time when on-device rendering showed the tone
+        // curve's shadow lift was being undone by brightness/contrast
+        // running AFTER it: toneCurve now runs LAST among the tonal ops
+        // (temperatureTint/colorControls/vibrance all precede it, matching
+        // Lightroom's own Basic-panel-before-Tone-Curve-panel order), right
+        // before the Effects-style ops (vignette/bloom/grain). fade was
+        // dropped (its "faded blacks" value turned out to be the same data
+        // as the tone curve's own black point) and vibrance was added (no
+        // colorControls equivalent) -- see golden_hour.json's own
+        // _tuningNote/_tuningNoteRound2 and EditOp.swift.
+        let expectedOpOrder: [String] = ["temperatureTint", "colorControls", "vibrance", "toneCurve", "vignette", "bloom", "grain"]
         for variant in pack.variants {
             #expect(variant.ops.map(Self.opTypeName) == expectedOpOrder, "\(variant.name)'s op order")
         }
@@ -212,11 +216,12 @@ struct VibePackTests {
         // x, each point actually a 2-element [x, y] pair round-tripping
         // through CGPoint's Codable conformance (the exact thing that broke
         // on device when the JSON used {"x":...,"y":...} objects instead).
-        // x-values are Sun-kissed's own tuned points (64/128/191 out of
-        // 255, not the untuned pack's exact quarter-points) -- not [0,
+        // Index 3, not 1 -- toneCurve now runs fourth in the reordered
+        // chain. x-values are Sun-kissed's own tuned points (64/128/191 out
+        // of 255, not the untuned pack's exact quarter-points) -- not [0,
         // 0.25, 0.5, 0.75, 1] anymore.
-        guard case .toneCurve(let points) = pack.variants[0].ops[1] else {
-            Issue.record("expected variants[0].ops[1] to be .toneCurve")
+        guard case .toneCurve(let points) = pack.variants[0].ops[3] else {
+            Issue.record("expected variants[0].ops[3] to be .toneCurve")
             return
         }
         #expect(points.count == 5)
