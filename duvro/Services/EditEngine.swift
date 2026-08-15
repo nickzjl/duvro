@@ -356,6 +356,16 @@ nonisolated enum EditEngine {
             filter.brightness = Float(brightness)
             filter.contrast = Float(contrast)
             return filter.outputImage
+        case .vibrance(let amount):
+            // Same minimal pattern as colorControls/vignette/bloom above --
+            // no bounds-checking beyond what CIFilter itself tolerates,
+            // since an extreme value produces an extreme-looking but
+            // non-crashing image, not a crash (fail-safe here means "never
+            // crashes," not "never looks odd" -- see file header).
+            let filter = CIFilter.vibrance()
+            filter.inputImage = image
+            filter.amount = Float(amount)
+            return filter.outputImage
         case .temperatureTint(let temperature, let tint):
             let filter = CIFilter.temperatureAndTint()
             filter.inputImage = image

@@ -197,8 +197,13 @@ struct VibePackTests {
         #expect(pack.variants.map(\.name) == ["Sun-kissed", "Warm Film", "Soft Glow"])
 
         // Every variant has the full 7-op Golden Hour chain, in order --
-        // BUILD_ROADMAP Phase 4's op list.
-        let expectedOpOrder: [String] = ["temperatureTint", "toneCurve", "colorControls", "vignette", "bloom", "grain", "fade"]
+        // updated when Golden Hour was tuned from a hand-graded reference:
+        // fade was dropped (its "faded blacks" value turned out to be the
+        // same data as the tone curve's own black point, applying both
+        // would double-lift shadows -- see golden_hour.json's own
+        // _tuningNote) and vibrance was added (no colorControls equivalent
+        // -- see EditOp.swift).
+        let expectedOpOrder: [String] = ["temperatureTint", "toneCurve", "vibrance", "colorControls", "vignette", "bloom", "grain"]
         for variant in pack.variants {
             #expect(variant.ops.map(Self.opTypeName) == expectedOpOrder, "\(variant.name)'s op order")
         }
@@ -207,12 +212,15 @@ struct VibePackTests {
         // x, each point actually a 2-element [x, y] pair round-tripping
         // through CGPoint's Codable conformance (the exact thing that broke
         // on device when the JSON used {"x":...,"y":...} objects instead).
+        // x-values are Sun-kissed's own tuned points (64/128/191 out of
+        // 255, not the untuned pack's exact quarter-points) -- not [0,
+        // 0.25, 0.5, 0.75, 1] anymore.
         guard case .toneCurve(let points) = pack.variants[0].ops[1] else {
             Issue.record("expected variants[0].ops[1] to be .toneCurve")
             return
         }
         #expect(points.count == 5)
-        #expect(points.map(\.x) == [0, 0.25, 0.5, 0.75, 1])
+        #expect(points.map(\.x) == [0, 0.251, 0.502, 0.749, 1])
     }
 
     // Phase 8, Task 2: same reasoning as goldenHourLoadsFromTheAppBundle
@@ -355,6 +363,7 @@ struct VibePackTests {
         switch op {
         case .toneCurve: return "toneCurve"
         case .colorControls: return "colorControls"
+        case .vibrance: return "vibrance"
         case .temperatureTint: return "temperatureTint"
         case .vignette: return "vignette"
         case .bloom: return "bloom"

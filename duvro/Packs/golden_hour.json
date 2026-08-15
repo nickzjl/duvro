@@ -1,61 +1,61 @@
 {
-  "_note": "UNTUNED. Rough, plausible starting parameters only -- nobody has seen these rendered yet. Do not treat as final; see BUILD_ROADMAP's Deferred work register (\"Golden Hour filter tuning\"). Values will be replaced from rendered output on a real device.",
   "_schemaNote": "toneCurve points are [x, y] pairs, e.g. [0.25, 0.24] -- NOT {\"x\":...,\"y\":...} objects. This matches CGPoint's actual Codable wire format (an unkeyed 2-element array), confirmed against CoreGraphics.swiftinterface -- {x,y} was a real bug shipped once (decode failure on device, every variant). Digicam/Travel Film authors: copy this format.",
+  "_tuningNote": "TUNED from a hand-graded reference image (Lightroom units), converted onto CoreImage's parameter ranges. See EditOp.swift/EditEngine.swift and the session's own report for the exact conversion math (EV->brightness via a mid-gray anchor, LR contrast/saturation percent points -> CIColorControls multiplier offset from 1.0, temperature given as a mired-space warming delta applied against a fixed 6500K/tint-0 baseline (matches EditEngine.temperatureTint's own fixed source neutral), tint sign-flipped after empirically verifying this filter's magenta/green direction on-device rather than assuming Lightroom's convention carries over, 0-255 tone-curve values normalized to 0-1, bloom radius-as-percent-of-width converted to pixels against the 1280px preview reference width). Two of the three variants' tone curves were reduced from the reference's 7 points to CIToneCurve's required 5 by dropping the two innermost 1/8-and-7/8 handles (keeping 0, 1/4, 1/2, 3/4, 1) -- the dropped points were within ~2/255 of the straight line between their surviving neighbors, so the spline through the remaining 5 approximates them closely. The reference's separate 'faded blacks' value was NOT applied via the fade op -- it's numerically identical to each variant's own tone-curve black point (point0), i.e. the same data named twice, and applying both would double the shadow lift. fade is dropped from this pack's chain entirely; vibrance is new (CIVibrance has no colorControls equivalent -- see EditOp.swift).",
   "id": "golden_hour",
   "displayName": "Golden Hour",
   "variants": [
     {
       "name": "Sun-kissed",
       "ops": [
-        { "type": "temperatureTint", "temperature": 5200, "tint": 6 },
+        { "type": "temperatureTint", "temperature": 5752, "tint": -8 },
         { "type": "toneCurve", "points": [
-          [0,    0.02],
-          [0.25, 0.24],
-          [0.5,  0.54],
-          [0.75, 0.82],
-          [1,    0.99]
+          [0,      0.0471],
+          [0.251,  0.2275],
+          [0.502,  0.4863],
+          [0.749,  0.7529],
+          [1,      0.9333]
         ] },
-        { "type": "colorControls", "saturation": 1.25, "brightness": 0.02, "contrast": 1.08 },
-        { "type": "vignette", "intensity": 0.25, "radius": 1.4 },
-        { "type": "bloom", "radius": 8, "intensity": 0.35 },
-        { "type": "grain", "intensity": 0.04, "size": 1.0 },
-        { "type": "fade", "amount": 0.05 }
+        { "type": "vibrance", "amount": 0.14 },
+        { "type": "colorControls", "saturation": 1.04, "brightness": -0.0069, "contrast": 0.99 },
+        { "type": "vignette", "intensity": 0.08, "radius": 1.4 },
+        { "type": "bloom", "radius": 39.7, "intensity": 0.14 },
+        { "type": "grain", "intensity": 0.12, "size": 1.0 }
       ]
     },
     {
       "name": "Warm Film",
       "ops": [
-        { "type": "temperatureTint", "temperature": 5000, "tint": 8 },
+        { "type": "temperatureTint", "temperature": 5623, "tint": -4 },
         { "type": "toneCurve", "points": [
-          [0,    0.06],
-          [0.25, 0.26],
-          [0.5,  0.52],
-          [0.75, 0.76],
-          [1,    0.95]
+          [0,      0.0549],
+          [0.251,  0.2157],
+          [0.502,  0.4588],
+          [0.7529, 0.7098],
+          [1,      0.9255]
         ] },
-        { "type": "colorControls", "saturation": 0.9, "brightness": 0.0, "contrast": 0.95 },
-        { "type": "vignette", "intensity": 0.35, "radius": 1.2 },
-        { "type": "bloom", "radius": 5, "intensity": 0.15 },
-        { "type": "grain", "intensity": 0.10, "size": 1.3 },
-        { "type": "fade", "amount": 0.18 }
+        { "type": "vibrance", "amount": 0.07 },
+        { "type": "colorControls", "saturation": 0.96, "brightness": -0.0647, "contrast": 1.05 },
+        { "type": "vignette", "intensity": 0.10, "radius": 1.2 },
+        { "type": "bloom", "radius": 16.6, "intensity": 0.04 },
+        { "type": "grain", "intensity": 0.24, "size": 1.3 }
       ]
     },
     {
       "name": "Soft Glow",
       "ops": [
-        { "type": "temperatureTint", "temperature": 5600, "tint": 3 },
+        { "type": "temperatureTint", "temperature": 6030, "tint": -7 },
         { "type": "toneCurve", "points": [
-          [0,    0.08],
-          [0.25, 0.30],
-          [0.5,  0.55],
-          [0.75, 0.78],
-          [1,    0.94]
+          [0,      0.0706],
+          [0.251,  0.3020],
+          [0.502,  0.5608],
+          [0.7529, 0.7804],
+          [1,      0.9529]
         ] },
-        { "type": "colorControls", "saturation": 1.0, "brightness": 0.06, "contrast": 0.88 },
-        { "type": "vignette", "intensity": 0.12, "radius": 1.6 },
-        { "type": "bloom", "radius": 14, "intensity": 0.55 },
-        { "type": "grain", "intensity": 0.02, "size": 0.8 },
-        { "type": "fade", "amount": 0.12 }
+        { "type": "vibrance", "amount": 0.05 },
+        { "type": "colorControls", "saturation": 0.93, "brightness": 0.1156, "contrast": 0.78 },
+        { "type": "vignette", "intensity": 0.05, "radius": 1.6 },
+        { "type": "bloom", "radius": 76.8, "intensity": 0.24 },
+        { "type": "grain", "intensity": 0.10, "size": 0.8 }
       ]
     }
   ]

@@ -15,6 +15,15 @@
 //  the JSON schema. `halation` is still NOT included; nothing in Digicam or
 //  Travel Film needs it.
 //
+//  Golden Hour tuning added `vibrance` -- needed because the hand-graded
+//  reference specifies Vibrance and Saturation as separate, independently-
+//  valued adjustments (they behave differently on skin tones; colorControls'
+//  saturation alone can't reproduce vibrance's selective boost). No existing
+//  op covers it -- CIVibrance has no colorControls equivalent. Same "new
+//  case here plus a new branch in EditEngine.apply(_:to:)" pattern as Phase
+//  8's three additions; reuses the `amount` coding key already declared for
+//  `fade` rather than adding a redundant one.
+//
 
 import CoreGraphics
 
@@ -31,6 +40,13 @@ nonisolated enum EditOp: Sendable, Equatable {
     case toneCurve(points: [CGPoint])
     /// Matches CIColorControls 1:1.
     case colorControls(saturation: Double, brightness: Double, contrast: Double)
+    /// Matches CIVibrance's `amount` 1:1. Distinct from colorControls'
+    /// saturation on purpose -- vibrance boosts muted colors more than
+    /// already-saturated ones and is gentler on skin tones, which
+    /// colorControls' uniform saturation multiplier cannot reproduce
+    /// (Golden Hour's tuned values, first pack to need this op, rely on
+    /// that distinction -- see BUILD_ROADMAP).
+    case vibrance(amount: Double)
     /// Matches CITemperatureAndTint's targetNeutral; EditEngine supplies a
     /// fixed D65 (6500K, tint 0) neutral as the source white point.
     case temperatureTint(temperature: Double, tint: Double)
@@ -91,6 +107,7 @@ nonisolated extension EditOp: Codable {
     private enum OpType: String, Codable {
         case toneCurve, colorControls, temperatureTint, vignette, bloom, grain, fade
         case lightLeak, polaroidFrame, dateStamp
+        case vibrance
     }
 
     /// Field names are reused across cases on purpose (e.g. `intensity`
@@ -138,6 +155,8 @@ nonisolated extension EditOp: Codable {
             )
         case .fade:
             self = .fade(amount: try container.decode(Double.self, forKey: .amount))
+        case .vibrance:
+            self = .vibrance(amount: try container.decode(Double.self, forKey: .amount))
         case .lightLeak:
             self = .lightLeak(
                 intensity: try container.decode(Double.self, forKey: .intensity),
@@ -185,6 +204,9 @@ nonisolated extension EditOp: Codable {
             try container.encode(size, forKey: .size)
         case .fade(let amount):
             try container.encode(OpType.fade, forKey: .type)
+            try container.encode(amount, forKey: .amount)
+        case .vibrance(let amount):
+            try container.encode(OpType.vibrance, forKey: .type)
             try container.encode(amount, forKey: .amount)
         case .lightLeak(let intensity, let corner):
             try container.encode(OpType.lightLeak, forKey: .type)
