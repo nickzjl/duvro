@@ -203,6 +203,14 @@ struct CurationSequenceView: View {
     var sessionStore: SessionStore
     let pack: VibePack
     let count: Int
+    /// Phase 10: fires from emptyPhase's "back to vibes" button when
+    /// FallbackSelectionService returns nothing to curate -- see Phase's
+    /// own `.empty` case doc comment for why this exists and why it's a
+    /// required parameter, not a default no-op, at every call site.
+    /// Declared BEFORE onComplete, not after, so onComplete stays the
+    /// last parameter and every existing call site's trailing-closure
+    /// syntax for it keeps compiling unchanged.
+    var onBack: () -> Void
     /// Fires once the showcase's reveal sequence completes -- caller
     /// advances to the first edit screen (prd.md §4: "flow the user
     /// directly into editing... no accept/reject step here").
@@ -271,6 +279,26 @@ struct CurationSequenceView: View {
     private enum Phase {
         case shuffling
         case collage
+        /// Phase 10: FallbackSelectionService returned nothing selectable
+        /// (an empty shortlist -- everything rejected upstream, or a real
+        /// candidate pool too thin for even a small requested count).
+        /// BEFORE this case existed, an empty selection fell all the way
+        /// through to EditFlowView, where `post.isEmpty` made
+        /// `currentPhoto`/`currentScore` nil from the very first frame --
+        /// indistinguishable from EditFlowView's OWN "finished editing
+        /// every real photo" completion state, which auto-fires
+        /// `onComplete()` on appear. The user would see a blank flash of
+        /// "all set." and get pushed into FinalReview/Caption/Handoff
+        /// with a genuinely empty post (Handoff's own "your 0 most recent
+        /// photos" copy is a direct symptom of reaching this
+        /// unhandled). Caught here instead, at the one place the empty
+        /// result is actually produced, before any of that machinery
+        /// (shuffle-to-collage animation included -- an empty collage
+        /// would have been its own confusing, silent-feeling moment) ever
+        /// runs. Does NOT touch ShortlistService/FallbackSelectionService/
+        /// ClusteringService -- this reacts to their existing, unchanged
+        /// output being empty, it doesn't change what produces it.
+        case empty
     }
 
     @State private var phase: Phase = .shuffling
@@ -318,11 +346,15 @@ struct CurationSequenceView: View {
         ZStack {
             Color(hex: "F7F4EE").ignoresSafeArea()
 
-            if phase == .shuffling {
+            switch phase {
+            case .shuffling:
                 shufflingPhase
                     .transition(.identity) // no separate screen transition -- see file header
-            } else {
+            case .collage:
                 collagePhase
+            case .empty:
+                emptyPhase
+                    .transition(.opacity.animation(.easeOut(duration: 0.3)))
             }
         }
         .task {
@@ -360,6 +392,39 @@ struct CurationSequenceView: View {
             }
             Spacer(minLength: 60)
         }
+    }
+
+    // MARK: - Empty phase (Phase 10: FallbackSelectionService found nothing)
+
+    private var emptyPhase: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "photo.stack")
+                .font(.system(size: 40))
+                .foregroundStyle(Color(hex: "A7A097"))
+            Text("nothing quite made the cut.")
+                .font(.duvroHeadline)
+                .foregroundStyle(Color(hex: "171614"))
+                .multilineTextAlignment(.center)
+            Text("this batch didn't have enough strong candidates for the count you asked for. try a smaller number, or head back to add more photos.")
+                .font(.duvroSubheadline)
+                .foregroundStyle(Color(hex: "777169"))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+            Button(action: onBack) {
+                Text("back to vibes")
+                    .font(.duvroButton)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(Color(hex: "171614"))
+                    .clipShape(Capsule())
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 8)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
     }
 
     private var progressLine: some View {
@@ -540,6 +605,17 @@ struct CurationSequenceView: View {
         let chosen = FallbackSelectionService.select(from: shortlist, count: count)
         sessionStore.setChosenSelection(chosen)
         sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+
+        // Phase 10: caught HERE, before any shuffle-to-collage animation
+        // or EditFlowView handoff -- see Phase.empty's own doc comment
+        // for what this replaces. Deliberately does NOT call onComplete()
+        // -- there is nothing to edit, so auto-advancing into EditFlowView
+        // is exactly the bug this exists to avoid.
+        guard !chosen.selected.isEmpty else {
+            withAnimation(.easeOut(duration: 0.3)) { phase = .empty }
+            return
+        }
+
         finalSelection = chosen.selected
 
         // Kick off rendering immediately, off-thread, so it's ready (or

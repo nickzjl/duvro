@@ -53,6 +53,11 @@ struct HandoffView: View {
         return "your \(count) most recent \(count == 1 ? "photo" : "photos")"
     }
 
+    /// Fresh `canOpenURL` check, not cached -- see doneState's own comment
+    /// on why this needs to reflect a mid-session install, not just
+    /// whatever was true when the screen first appeared.
+    private var instagramInstalled: Bool { InstagramLauncher.isInstalled }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -258,20 +263,41 @@ struct HandoffView: View {
                         title: "caption copied",
                         body: "your caption is on the clipboard, ready to paste."
                     )
-                    stepRow(
-                        icon: "arrow.up.forward.app",
-                        title: "finish in instagram",
-                        // NO album to point at (Deferred work register:
-                        // NAMED ALBUM DROPPED IN V1) -- staggered
-                        // creationDate at export (ExportService.saveAll)
-                        // is what actually makes "the N most recent
-                        // photos" true, so this copy is describing a real
-                        // mechanism, not a suggestion. Order is the one
-                        // thing that silently breaks the post if the user
-                        // gets it wrong (UI_NOTES handoff fix) -- "tap
-                        // them in order" is required, not decoration.
-                        body: "select your \(recentPhotosPhrase) and tap \(sessionStore.post.count == 1 ? "it" : "them") in order, then paste your caption."
-                    )
+                    // Phase 10: BUILD_ROADMAP Known gotcha 7, "the app must
+                    // be fully usable ending at 'saved to your photos' even
+                    // if Instagram isn't installed" -- the two steps above
+                    // are ALREADY a complete, successful ending regardless
+                    // of what's below; this third step is adapted, not
+                    // treated as blocking, so a user without Instagram
+                    // reads it as "here's an optional next step whenever
+                    // you're ready," not as something duvro is stuck
+                    // waiting on. instagramInstalled is checked fresh each
+                    // render (a plain canOpenURL call, not cached) since
+                    // the user could install Instagram mid-session (App
+                    // Store, then back to duvro) and this should reflect
+                    // that without needing a relaunch.
+                    if instagramInstalled {
+                        stepRow(
+                            icon: "arrow.up.forward.app",
+                            title: "finish in instagram",
+                            // NO album to point at (Deferred work register:
+                            // NAMED ALBUM DROPPED IN V1) -- staggered
+                            // creationDate at export (ExportService.saveAll)
+                            // is what actually makes "the N most recent
+                            // photos" true, so this copy is describing a real
+                            // mechanism, not a suggestion. Order is the one
+                            // thing that silently breaks the post if the user
+                            // gets it wrong (UI_NOTES handoff fix) -- "tap
+                            // them in order" is required, not decoration.
+                            body: "select your \(recentPhotosPhrase) and tap \(sessionStore.post.count == 1 ? "it" : "them") in order, then paste your caption."
+                        )
+                    } else {
+                        stepRow(
+                            icon: "arrow.down.app",
+                            title: "get instagram to finish",
+                            body: "your photos are already saved and your caption's ready — install instagram whenever you like, then come back and post."
+                        )
+                    }
                 }
                 .padding(.horizontal, 20)
 
@@ -355,7 +381,14 @@ struct HandoffView: View {
         Button {
             InstagramLauncher.open()
         } label: {
-            Text("open instagram")
+            // Same label change as doneState's step 3 -- honest about
+            // where the tap leads (Instagram's App Store listing) rather
+            // than a generic "open instagram" that unexpectedly bounces
+            // there. `open()` itself is unchanged either way -- its own
+            // fallback chain already lands on the App Store when
+            // Instagram isn't installed; this only changes what the
+            // button SAYS it'll do, matching what it actually does.
+            Text(instagramInstalled ? "open instagram" : "get instagram")
                 .font(.duvroButton)
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)

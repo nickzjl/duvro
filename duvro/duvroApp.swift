@@ -122,6 +122,18 @@ enum DebugLaunchScreen: String {
     /// own sessionStore, previously invoked only as a pack-load-failure
     /// fallback.
     case shortlistDebug
+    /// Phase 10: lands directly on HandoffView (golden_hour, same
+    /// convention as editFlow/finalReview/caption) -- previously only
+    /// reachable by tapping all the way through editFlow -> finalReview ->
+    /// caption -> handoff, which simctl can't do. Needed to screenshot
+    /// ExportService's `.permissionDenied` state (toggle Photos add
+    /// permission first: `xcrun simctl privacy <device> revoke photos-add
+    /// app.duvro.duvro`) and the "Instagram not installed" copy
+    /// (InstagramLauncher.isInstalled reads false on any simulator with no
+    /// Instagram install, which is every simulator in this environment) --
+    /// both states Phase 10's error/empty-state pass needed to verify by
+    /// eye, neither reachable any other way from simctl.
+    case handoff
 }
 
 enum DebugLaunch {
@@ -218,7 +230,15 @@ struct DebugLaunchRootView: View {
                                 showFinalReview = true
                             }
                         } else {
-                            CurationSequenceView(sessionStore: sessionStore, pack: pack, count: DebugLaunch.count) {
+                            // No-op, matching packPreviewDestination's/
+                            // welcomeDestination's own convention for
+                            // screenshot-only launch paths -- there's
+                            // nowhere meaningful for "back" to go outside
+                            // the real app's navigation, and this path
+                            // exists purely to verify the shuffle/collage/
+                            // empty phases render, not to be interacted
+                            // with.
+                            CurationSequenceView(sessionStore: sessionStore, pack: pack, count: DebugLaunch.count, onBack: {}) {
                                 curationSequenceComplete = true
                             }
                         }
@@ -272,6 +292,13 @@ struct DebugLaunchRootView: View {
                                 showCaption = true
                             }
                         }
+                    case .handoff:
+                        // Lands directly on HandoffView -- ExportService
+                        // kicks off its own permission request/export in
+                        // HandoffView's own .task, exactly as the real flow
+                        // does; nothing simulated here beyond skipping the
+                        // screens that would normally lead to this one.
+                        HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
                     }
                 } else {
                     fallback(shortlist)
@@ -360,7 +387,7 @@ struct DebugLaunchRootView: View {
     /// but the switch still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
-        case .editFlow, .advancedSheet, .finalReview, .caption: return "golden_hour"
+        case .editFlow, .advancedSheet, .finalReview, .caption, .handoff: return "golden_hour"
         case .packPreview, .curationSequence: return DebugLaunch.packName
         case .vibeSelect, .welcome, .shortlistDebug: return "golden_hour"
         }
@@ -418,7 +445,10 @@ struct DebugLaunchRootView: View {
                     // jump straight to EditFlowView -- CurationSequenceView
                     // now owns that pipeline call, same as ImportView's own
                     // two "use this vibe" call sites.
-                    CurationSequenceView(sessionStore: sessionStore, pack: vibeSelectResult.pack, count: vibeSelectResult.count) {
+                    CurationSequenceView(sessionStore: sessionStore, pack: vibeSelectResult.pack, count: vibeSelectResult.count, onBack: {
+                        self.vibeSelectResult = nil // `if let vibeSelectResult` above shadows the @State property -- self. reaches the real one
+                        vibeSelectCurationComplete = false
+                    }) {
                         vibeSelectCurationComplete = true
                     }
                 }

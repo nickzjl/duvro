@@ -226,6 +226,22 @@ struct ImportView: View {
         .sheet(isPresented: $isPickerPresented) {
             PhotoPicker(selectionLimit: maximumPhotos) { results in
                 isPickerPresented = false
+                // Phase 10: PHPicker has no separate "did cancel" delegate
+                // callback -- dismissing without picking anything invokes
+                // this SAME completion handler with an empty results array,
+                // identical to picking 1-19 photos and stopping short of
+                // the floor. Handled as two genuinely different moments,
+                // not one: a user who changed their mind gets silently
+                // returned to emptyState (still right there, still a
+                // complete "way forward" on its own -- no reason to
+                // interrupt someone who didn't attempt anything with an
+                // alert that reads as "you selected 0", which sounds like
+                // a failed attempt rather than a deliberate cancel). A user
+                // who picked SOME photos but stopped short of the floor
+                // gets the existing alert -- that IS a real, worth-
+                // surfacing mismatch between what they did and what's
+                // needed.
+                guard !results.isEmpty else { return }
                 // Checked on `results` (the picker's own return value)
                 // rather than after import/downsampling -- available the
                 // instant the picker returns, no need to wait on
@@ -491,7 +507,17 @@ struct ImportView: View {
                 // and the first edit screen. PHASE 9/10 CURATION
                 // INSERTION POINT closed -- this is what used to jump
                 // straight to EditFlowView.
-                CurationSequenceView(sessionStore: sessionStore, pack: realFlowPack, count: realFlowCount) {
+                CurationSequenceView(sessionStore: sessionStore, pack: realFlowPack, count: realFlowCount, onBack: {
+                    // Phase 10 empty-result state: back to VibeSelectionView
+                    // within this same cover, same reset continueButton's
+                    // action already uses -- not all the way out to
+                    // ImportView, since the user may just want a smaller
+                    // count or a different pack, not to re-import.
+                    // `if let realFlowPack` above shadows the @State
+                    // property -- self. reaches the real one.
+                    self.realFlowPack = nil
+                    curationComplete = false
+                }) {
                     curationComplete = true
                 }
             }
@@ -598,7 +624,10 @@ struct ImportView: View {
                     showVibeSelectDebugFinalReview = true
                 }
             } else {
-                CurationSequenceView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack, count: vibeSelectDebugResult.count) {
+                CurationSequenceView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack, count: vibeSelectDebugResult.count, onBack: {
+                    self.vibeSelectDebugResult = nil // `if let vibeSelectDebugResult` above shadows the @State property -- self. reaches the real one
+                    vibeSelectDebugCurationComplete = false
+                }) {
                     vibeSelectDebugCurationComplete = true
                 }
             }

@@ -26,6 +26,23 @@ nonisolated enum InstagramLauncher {
     /// Instagram's real App Store numeric id -- stable, not duvro-specific.
     private static let appStoreURL = URL(string: "https://apps.apple.com/app/instagram/id389801252")!
 
+    /// Phase 10: BUILD_ROADMAP Known gotcha 7, "the app must be fully
+    /// usable ending at 'saved to your photos' even if Instagram isn't
+    /// installed" -- checking this UP FRONT (not just letting `open()`
+    /// silently fall through to the App Store) is what lets HandoffView
+    /// adapt its copy/button proactively, so a user without Instagram
+    /// isn't surprised by an unlabeled button bouncing them to the App
+    /// Store. Same `canOpenURL(appURL)` check `open()` already makes --
+    /// not a new capability, just exposed so a caller can read it before
+    /// the button is even tapped. Requires "instagram" in
+    /// Info-Additions.plist's LSApplicationQueriesSchemes (already added,
+    /// see this file's own header) -- without that entry canOpenURL
+    /// always returns false regardless of whether Instagram is installed.
+    @MainActor
+    static var isInstalled: Bool {
+        UIApplication.shared.canOpenURL(appURL)
+    }
+
     @MainActor
     static func open() {
         let application = UIApplication.shared

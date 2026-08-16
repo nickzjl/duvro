@@ -58,6 +58,11 @@ struct CaptionView: View {
     @State private var captionText = ""
     @State private var usedCaptions: Set<String> = []
     @State private var isLoading = true
+    /// Phase 10: honest "no network" state -- see NetworkMonitor's own
+    /// header for why this never blocks anything here (TemplateCaptionService
+    /// already works offline; this only surfaces the real signal rather
+    /// than staying silent about it).
+    @State private var networkMonitor = NetworkMonitor()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,6 +70,9 @@ struct CaptionView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     headline
+                    if !networkMonitor.isConnected {
+                        offlineNote
+                    }
                     captionField
                     regenerateButton
                 }
@@ -117,6 +125,22 @@ struct CaptionView: View {
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Offline note (Phase 10: honest, not blocking -- see NetworkMonitor)
+
+    private var offlineNote: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 11, weight: .semibold))
+            Text("no connection — here's a caption to get you started.")
+                .font(.duvroCaption)
+        }
+        .foregroundStyle(Color(hex: "777169"))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(hex: "EEE9DF")) // Secondary surface, §1 -- understated, not an error color
+        .clipShape(Capsule())
     }
 
     // MARK: - The one editable suggestion (UI_NOTES §3: one, not three)
