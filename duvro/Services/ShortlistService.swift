@@ -75,13 +75,19 @@ nonisolated enum ShortlistService {
     /// people-first composition.
     private static let categoryFillOrder: [PhotoCategory] = [.people, .place, .food, .detail]
 
-    static func buildShortlist(from scores: [PhotoScore]) -> ShortlistResult {
+    /// `clusterThreshold` defaults to ClusteringService's own default but
+    /// can be overridden -- threaded through for the same reason
+    /// ClusteringService.cluster's own parameter exists: ShortlistDebugView's
+    /// DEBUG threshold stepper re-runs the whole shortlist (not just
+    /// clustering in isolation) so the quota-fill/per-cluster-cap effects of
+    /// a threshold change are visible too, not just the raw cluster sizes.
+    static func buildShortlist(from scores: [PhotoScore], clusterThreshold: Double = ClusteringService.duplicateDistanceThreshold) -> ShortlistResult {
         let startTime = Date()
 
         let surviving = scores.filter { !$0.isHardRejected }
         let rejectedCount = scores.count - surviving.count
 
-        let clusters = ClusteringService.cluster(surviving)
+        let clusters = ClusteringService.cluster(surviving, threshold: clusterThreshold)
 
         // Diagnostic, not a fix: ClusteringService.cluster assigns a
         // clusterID to every item it's given, unconditionally -- a missing

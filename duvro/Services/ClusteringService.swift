@@ -40,10 +40,19 @@ import Vision
 /// actor if a future caller wants that (matches CompositeScoring's rationale
 /// for the same annotation).
 nonisolated enum ClusteringService {
-    /// Starting point per BUILD_ROADMAP Phase 3. Tune from the debug view
-    /// against real bursts -- not tuned here, not tuned against synthetic
-    /// data.
-    static let duplicateDistanceThreshold: Double = 0.55
+    /// Starting point per BUILD_ROADMAP Phase 3, LOWERED after a real
+    /// 134-photo device run at the original 0.55: single-link clustering
+    /// chains transitively (A merges with C whenever both are within
+    /// threshold of some B, even if A and C themselves are far apart), and
+    /// 0.55 was loose enough to collapse 91 of 134 surviving photos into
+    /// ONE cluster -- nothing close to a plausible burst. 0.35 is
+    /// BUILD_ROADMAP's own next-value-to-try, not independently derived --
+    /// there was no way to reason quantitatively about the right number
+    /// without real feature-print distance data, which needs a device
+    /// (Vision doesn't run in the Simulator). Tune this live from
+    /// ShortlistDebugView's threshold stepper (DEBUG builds) rather than
+    /// rebuilding -- see that view for how the override works.
+    static let duplicateDistanceThreshold: Double = 0.35
 
     struct Result {
         /// clusterID for every photo passed in. A photo with no
@@ -61,7 +70,12 @@ nonisolated enum ClusteringService {
     }
 
     /// `scores` must already exclude rejected photos (see file header).
-    static func cluster(_ scores: [PhotoScore]) -> Result {
+    /// `threshold` defaults to `duplicateDistanceThreshold` but can be
+    /// overridden -- the parameter exists specifically so
+    /// ShortlistDebugView's DEBUG stepper can re-run clustering at a
+    /// different value without rebuilding, not because any other caller
+    /// needs a non-default threshold today.
+    static func cluster(_ scores: [PhotoScore], threshold: Double = duplicateDistanceThreshold) -> Result {
         let n = scores.count
         guard n > 0 else { return Result(clusterID: [:], members: [:], distanceFailureCount: 0) }
 
@@ -93,7 +107,7 @@ nonisolated enum ClusteringService {
                     #endif
                     continue
                 }
-                if distance < duplicateDistanceThreshold {
+                if distance < threshold {
                     union(i, j)
                 }
             }

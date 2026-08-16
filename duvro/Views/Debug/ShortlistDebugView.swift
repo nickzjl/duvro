@@ -19,9 +19,30 @@ import SwiftUI
 
 struct ShortlistDebugView: View {
     let photos: [Photo]
-    let result: ShortlistResult
+    /// @State, not `let` -- the DEBUG threshold stepper below re-runs
+    /// ShortlistService.buildShortlist at a new clusterThreshold and
+    /// replaces this, so the whole view (header stats, cluster-size
+    /// summary, category sections) reflects the new result immediately,
+    /// no rebuild or relaunch needed. `selection`/`runnerUps` are NOT
+    /// recomputed on re-run -- they're FallbackSelectionService/
+    /// RunnerUpService output, downstream of a DIFFERENT shortlist call
+    /// the caller already made; re-running clustering here doesn't retroactively
+    /// change what was actually selected for the session, it's a
+    /// what-if view onto the shortlist step alone. Init seeds this from
+    /// the caller's `result` param, same external shape as before.
+    @State private var result: ShortlistResult
     var selection: FallbackSelectionResult?
     var runnerUps: [PhotoScore] = []
+    #if DEBUG
+    @State private var thresholdOverride: Double = ClusteringService.duplicateDistanceThreshold
+    #endif
+
+    init(photos: [Photo], result: ShortlistResult, selection: FallbackSelectionResult? = nil, runnerUps: [PhotoScore] = []) {
+        self.photos = photos
+        self._result = State(initialValue: result)
+        self.selection = selection
+        self.runnerUps = runnerUps
+    }
 
     private var photosByID: [UUID: Photo] {
         Dictionary(uniqueKeysWithValues: photos.map { ($0.id, $0) })
@@ -44,6 +65,9 @@ struct ShortlistDebugView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    #if DEBUG
+                    thresholdControl
+                    #endif
                     if let selection {
                         chosenSection(selection)
                     }
@@ -106,6 +130,42 @@ struct ShortlistDebugView: View {
         .background(Color(hex: "FFFCF7"))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
+
+    #if DEBUG
+    /// Re-runs ShortlistService against `result.surviving` (already
+    /// rejection-filtered, so buildShortlist's own filter is a no-op) at a
+    /// new clusterThreshold and replaces `result` -- lets the clustering
+    /// threshold (Deferred work register item 2) be tuned against real
+    /// on-device feature-print distances by tapping through values, no
+    /// rebuild or relaunch needed. 0.05 steps span 0.55's old default down
+    /// past 0.25 (BUILD_ROADMAP's own two suggested next values) in ten
+    /// taps; the clamp just keeps the stepper off nonsensical distances
+    /// (CIFeaturePrint distances are typically well under 2.0, but nothing
+    /// here enforces that as a hard ceiling, only a UI sanity bound).
+    private var thresholdControl: some View {
+        HStack {
+            Text("cluster threshold")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            Text(String(format: "%.2f", thresholdOverride))
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Color(hex: "777169"))
+            Stepper(
+                "",
+                value: $thresholdOverride,
+                in: 0.05...1.0,
+                step: 0.05
+            )
+            .labelsHidden()
+            .onChange(of: thresholdOverride) {
+                result = ShortlistService.buildShortlist(from: result.surviving, clusterThreshold: thresholdOverride)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(hex: "FFFCF7"))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+    #endif
 
     // MARK: - Chosen (FallbackSelectionService output)
 
