@@ -144,6 +144,54 @@ struct ImportView: View {
     @State private var vibeSelectDebugCaption = ""
     @State private var showVibeSelectDebugHandoff = false
     @State private var showPackPreviewDebug = false
+
+    /// True while ANY other presentation this file can show is active --
+    /// the real flow's showVibeSelect, or any of this file's own DEBUG
+    /// covers/sheets (deliberately including showVibeSelectDebug and its
+    /// own downstream chain, not just showVibeSelect, since they share the
+    /// same presenting view -- ImportView -- and so share the same "only
+    /// one presentation at a time" constraint).
+    ///
+    /// Exists to guard showScoringGrid's auto-fire below. Every OTHER
+    /// presentation trigger in this file is gated behind a user TAP inside
+    /// `debugScoringControls`, which is physically untappable whenever
+    /// something is already presented (the active presentation captures
+    /// all touch input) -- so those are safe by construction, no explicit
+    /// check needed. showScoringGrid's auto-fire is the one exception: it
+    /// fires from Vision's own scoring completing, not a tap, so nothing
+    /// stops it from firing while ImportView is obscured UNLESS it
+    /// explicitly checks first.
+    ///
+    /// REGRESSION this fixes: scoring finishing was throwing the user out
+    /// of vibe selection back to this file's own photo grid -- this
+    /// handler firing while showVibeSelect's real-flow cover was already
+    /// active was the cause, once the picker-dismiss flow change made
+    /// showVibeSelect reachable in one tap (previously the user had to
+    /// tap through the grid manually, which usually gave scoring time to
+    /// finish first -- this was latent before that change, not new).
+    ///
+    /// Investigated whether the real fix is moving showVibeSelect's
+    /// ownership out of ImportView entirely (to RootFlowView), since this
+    /// is the second presentation-conflict bug in this file (the first was
+    /// the white-screen bug, two of ImportView's OWN real-flow covers
+    /// colliding, fixed by consolidating them into this one showVibeSelect
+    /// cover). Concluded ownership isn't the actual mechanism: this bug's
+    /// own repro is direct proof that ImportView's other @State keeps
+    /// mutating and its other onChange handlers keep firing even while ONE
+    /// of its own presentations is already active (showScoringGrid DID get
+    /// set true -- it just then collided) -- a presented view's presenting
+    /// ancestor stays mounted and reactive underneath, so an ancestor
+    /// owning the cover instead of ImportView itself wouldn't stop
+    /// ImportView's own onChange from firing the same way. The actual
+    /// fault line is "gated behind a tap" vs "fires on its own" -- moving
+    /// WHERE showVibeSelect lives doesn't change which category
+    /// showScoringGrid's trigger is in. Any FUTURE auto-firing (non-tap)
+    /// presentation trigger added to this file needs this same guard.
+    private var isAnyOtherPresentationActive: Bool {
+        showVibeSelect || showVibeSelectDebug || showEditFlowDebug || showFinalReviewDebug
+            || showCaptionDebug || showHandoffDebug || showCaptionDebugStandalone
+            || showPackPreviewDebug || showShortlistDebug || showEditDebug
+    }
     #endif
 
     private let minimumPhotos = 20
@@ -286,7 +334,18 @@ struct ImportView: View {
             // Auto-present the grid the moment a scoring pass finishes, whether
             // it produced results or not -- an empty grid is itself a signal
             // something's wrong, and shouldn't be hidden behind a manual tap.
-            if wasScoring && !isScoringNow {
+            //
+            // REGRESSION FIX: guarded against firing while something else is
+            // already presented -- see isAnyOtherPresentationActive's own doc
+            // comment. Without this, scoring finishing while the user sat on
+            // vibe selection (showVibeSelect, reachable in one tap since the
+            // picker-dismiss flow change) would try to ALSO present this sheet
+            // from the same ImportView, and the resulting presentation
+            // conflict threw the user back to ImportView's own grid -- the
+            // screen the real flow is never supposed to show. Same root
+            // mechanism as the earlier white-screen bug (two presentation
+            // triggers on one view), not a new one.
+            if wasScoring && !isScoringNow && !isAnyOtherPresentationActive {
                 showScoringGrid = true
             }
         }
