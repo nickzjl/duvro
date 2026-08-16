@@ -110,6 +110,18 @@ enum DebugLaunchScreen: String {
     /// for testing the showcase's layout at both ends of prd.md §4 step
     /// 3's 4-20 range.
     case curationSequence
+    /// Lands directly on ShortlistDebugView (cluster inspector + shortlist
+    /// breakdown) using DebugFixture's scores -- this view was previously
+    /// reachable ONLY via ImportView's "shortlist"/"fixture" debug
+    /// buttons, both gated behind a REAL PHPicker import (the buttons only
+    /// appear once `importService.photos` is non-empty, and nothing short
+    /// of an actual picker selection populates that) -- unreachable from
+    /// simctl, which can't tap through a system picker either. Reuses
+    /// DebugLaunchRootView's existing `fallback(_:)` view builder, not a
+    /// new one -- that already builds ShortlistDebugView from this file's
+    /// own sessionStore, previously invoked only as a pack-load-failure
+    /// fallback.
+    case shortlistDebug
 }
 
 enum DebugLaunch {
@@ -180,14 +192,19 @@ struct DebugLaunchRootView: View {
                     vibeSelectDestination()
                 } else if screen == .welcome {
                     welcomeDestination()
+                } else if screen == .shortlistDebug {
+                    // Doesn't need a VibePack -- ShortlistDebugView takes
+                    // none -- so this bypasses the VibePackLoader branch
+                    // below entirely, same reasoning as .vibeSelect/.welcome.
+                    fallback(shortlist)
                 } else if case .success(let pack) = VibePackLoader.load(named: packNameToLoad) {
                     switch screen {
                     case .packPreview:
                         packPreviewDestination(pack: pack)
                     case .caption:
                         CaptionView(sessionStore: sessionStore, pack: pack, onBack: {}, onContinue: { _ in })
-                    case .vibeSelect, .welcome:
-                        EmptyView() // unreachable -- both handled above, before this branch is ever entered
+                    case .vibeSelect, .welcome, .shortlistDebug:
+                        EmptyView() // unreachable -- all three handled above, before this branch is ever entered
                     case .advancedSheet:
                         // Purely for screenshotting the sheet's initial
                         // appearance (same convention as
@@ -338,14 +355,14 @@ struct DebugLaunchRootView: View {
     /// editFlow/finalReview keep their EXACT prior hardcoded value
     /// ("golden_hour") -- only packPreview's choice is dynamic. Computed
     /// once here rather than duplicating the literal in two places.
-    /// Never actually called for .vibeSelect or .welcome (both branches
-    /// short-circuit in `body` before reaching this), but the switch
-    /// still has to be exhaustive over DebugLaunchScreen.
+    /// Never actually called for .vibeSelect, .welcome, or .shortlistDebug
+    /// (all three branches short-circuit in `body` before reaching this),
+    /// but the switch still has to be exhaustive over DebugLaunchScreen.
     private var packNameToLoad: String {
         switch screen {
         case .editFlow, .advancedSheet, .finalReview, .caption: return "golden_hour"
         case .packPreview, .curationSequence: return DebugLaunch.packName
-        case .vibeSelect, .welcome: return "golden_hour"
+        case .vibeSelect, .welcome, .shortlistDebug: return "golden_hour"
         }
     }
 

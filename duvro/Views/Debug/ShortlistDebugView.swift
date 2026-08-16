@@ -60,6 +60,71 @@ struct ShortlistDebugView: View {
         }
     }
 
+    /// Cluster inspector, folded into this view rather than built as a
+    /// separate screen -- see this file's own session report for why.
+    /// Short version: the threshold stepper already re-runs
+    /// ShortlistService and replaces `result` (a plain struct, not a
+    /// reference type), so anything reading `result` live-updates for
+    /// free. A separately PUSHED screen (NavigationLink) would receive a
+    /// value-type snapshot of `result` at push time and go stale the
+    /// moment the stepper changed the threshold while it was on screen --
+    /// exactly the "respect the DEBUG threshold stepper" requirement this
+    /// was built to satisfy. A same-view mode toggle has no such
+    /// snapshot -- it's the same `@State` either way.
+    private enum InspectorMode: String, CaseIterable {
+        case shortlist, clusters
+    }
+    @State private var inspectorMode: InspectorMode = .shortlist
+
+    private var modePicker: some View {
+        Picker("view", selection: $inspectorMode) {
+            Text("shortlist").tag(InspectorMode.shortlist)
+            Text("clusters (\(result.clusterMembers.count))").tag(InspectorMode.clusters)
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var scoresByID: [UUID: PhotoScore] {
+        Dictionary(uniqueKeysWithValues: result.surviving.map { ($0.id, $0) })
+    }
+
+    /// Every cluster over ALL survivors (not just shortlisted photos) --
+    /// same universe `clusterSizeSummary` already counts over, so the
+    /// inspector and the header's own numbers never disagree. Largest
+    /// first, per spec; ties broken by cluster ID for a stable order
+    /// across re-renders. Members within a cluster are composite-sorted
+    /// descending, so the first card is always the one that would win the
+    /// cluster's shortlist slot.
+    private var clustersLargestFirst: [(id: Int, members: [PhotoScore])] {
+        let byID = scoresByID
+        return result.clusterMembers.map { id, uuids in
+            (id, uuids.compactMap { byID[$0] }.sorted { $0.compositeScore > $1.compositeScore })
+        }
+        .sorted { lhs, rhs in
+            lhs.members.count != rhs.members.count ? lhs.members.count > rhs.members.count : lhs.id < rhs.id
+        }
+    }
+
+    private func clusterSection(id: Int, members: [PhotoScore]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("cluster \(id) — \(members.count) photo\(members.count == 1 ? "" : "s")")
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(hex: "171614"))
+                .foregroundStyle(.white)
+                .clipShape(Capsule())
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+                ForEach(Array(members.enumerated()), id: \.element.id) { index, score in
+                    if let photo = photosByID[score.id] {
+                        ClusterMemberCard(photo: photo, score: score, rank: index + 1)
+                    }
+                }
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -68,14 +133,22 @@ struct ShortlistDebugView: View {
                     #if DEBUG
                     thresholdControl
                     #endif
-                    if let selection {
-                        chosenSection(selection)
-                    }
-                    if !runnerUps.isEmpty {
-                        runnerUpSection
-                    }
-                    ForEach(groupedByCategory, id: \.category) { group in
-                        categorySection(group.category, group.items)
+                    modePicker
+                    switch inspectorMode {
+                    case .shortlist:
+                        if let selection {
+                            chosenSection(selection)
+                        }
+                        if !runnerUps.isEmpty {
+                            runnerUpSection
+                        }
+                        ForEach(groupedByCategory, id: \.category) { group in
+                            categorySection(group.category, group.items)
+                        }
+                    case .clusters:
+                        ForEach(clustersLargestFirst, id: \.id) { cluster in
+                            clusterSection(id: cluster.id, members: cluster.members)
+                        }
                     }
                 }
                 .padding(12)
@@ -303,6 +376,55 @@ private struct ShortlistCard: View {
             }
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(Color(hex: "777169"))
+        }
+        .padding(6)
+        .background(Color(hex: "FFFCF7"))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// Cluster inspector's own card -- deliberately NOT reusing ShortlistCard:
+/// that card's whole reason to print "cluster N" on itself is that it
+/// appears in category sections where cluster membership isn't otherwise
+/// visible; inside a cluster SECTION that's already the section header, so
+/// repeating it on every card would be noise. Shows a "wins" badge on
+/// `rank == 1` instead -- the composite-highest member of the cluster,
+/// i.e. the one ShortlistService's per-cluster cap would keep first --
+/// answering "which one wins its cluster" at a glance rather than making
+/// the reader compare five decimal scores by eye.
+private struct ClusterMemberCard: View {
+    let photo: Photo
+    let score: PhotoScore
+    let rank: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topLeading) {
+                Image(uiImage: photo.thumbnail)
+                    .resizable()
+                    .aspectRatio(4 / 5, contentMode: .fill)
+                    .frame(height: 120)
+                    .clipped()
+
+                if rank == 1 {
+                    Text("wins")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: "A04021"))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .padding(4)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            Text(String(format: "%.3f", score.compositeScore))
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+
+            Text("\(score.category.rawValue) · face \(score.faceCount)  q\(String(format: "%.2f", score.bestFaceQuality))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color(hex: "777169"))
         }
         .padding(6)
         .background(Color(hex: "FFFCF7"))
