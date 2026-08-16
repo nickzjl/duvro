@@ -1,5 +1,6 @@
 {
-  "_comment": "Hand-tune this file freely. Keys are dump categories; values are Vision ClassifyImageRequest identifiers (the exact strings the on-device model returns -- confirmed against the real supportedIdentifiers list, not guessed). `people` is NOT listed here: it's decided by face detection, never by classification (see CategoryMapper.swift). Anything not listed below, for a photo with zero faces, falls through to `detail`. A label only counts if a photo's face count is zero AND the label is among its top classifications above the confidence threshold (see ScoringService).",
+  "_comment": "Hand-tune this file freely. Keys are dump categories; values are Vision ClassifyImageRequest identifiers (the exact strings the on-device model returns -- confirmed against the real supportedIdentifiers list via VNClassifyImageRequest.knownClassifications, not guessed). `people` is NOT listed here: it's decided by face detection, never by classification (see CategoryMapper.swift). Anything not listed below, for a photo with zero faces AND no sufficiently confident match in either table, falls through to `detail` -- an intentional, explicit fallback, not a bug. A label only counts if a photo's face count is zero, the label is among its top classifications above ScoringService's own confidence threshold (which just decides what's worth keeping/showing at all), AND its own confidence clears CategoryMapper.categoryMatchConfidenceThreshold (a separate, higher bar for actually accepting a category match -- see that constant's doc comment).",
+  "_tuningNote": "`place` widened from 50 to 68 identifiers after a real 134-photo device run put only 1 photo in `place` despite the roll containing real scenery. Audited the FULL real taxonomy (1303 identifiers, via VNClassifyImageRequest.knownClassifications) rather than guessing: the original 50 were already 100% real (no typos), but missed a wide swath of common, generic outdoor/scenery vocabulary Vision actually emits -- most notably `outdoor` itself, plus `tree`, `water`, `water_body`, `grass`, `rocks`, `sun`, `cloudy`, `underwater`, `rock_climbing`, `skydiving`, `sunbathing`, `fountain`, `path`, `shore`, `sidewalk`, `statue`, `wetland`. `food`'s one non-real entry (`meal`) was removed -- harmless (silently never matched anything), but dead weight now that the list has been audited against the real taxonomy anyway.",
 
   "place": [
     "beach", "mountain", "canyon", "cave", "cliff", "desert", "forest",
@@ -9,11 +10,14 @@
     "dirt_road", "railroad", "park", "garden", "farm", "vineyard", "jungle",
     "trail", "hiking", "camping", "tent", "sand_dune", "coral_reef",
     "castle", "monument", "museum", "stadium", "amusement_park",
-    "rollercoaster", "skatepark", "parking_lot", "pier", "dock", "pool"
+    "rollercoaster", "skatepark", "parking_lot", "pier", "dock", "pool",
+    "outdoor", "tree", "water", "water_body", "grass", "rocks", "sun",
+    "cloudy", "underwater", "rock_climbing", "skydiving", "sunbathing",
+    "fountain", "path", "shore", "sidewalk", "statue", "wetland"
   ],
 
   "food": [
-    "food", "meal", "dessert", "drink", "baked_goods", "baklava", "beer",
+    "food", "dessert", "drink", "baked_goods", "baklava", "beer",
     "birthday_cake", "bread", "white_bread", "bubble_tea", "cake",
     "cake_regular", "cakestand", "candy", "candy_cane", "candy_other",
     "cheese", "cheesecake", "chocolate", "chocolate_chip", "citrus_fruit",

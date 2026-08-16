@@ -159,8 +159,11 @@ final class ScoringService {
     nonisolated private static func assemblePhotoScore(from raw: RawPhotoScore) -> PhotoScore {
         let hasFaces = !raw.faceObservations.isEmpty
         let hasHumans = raw.humanCount > 0
-        let labels = raw.classificationLabels.map(\.identifier)
-        let category = CategoryMapper.shared.category(hasFaces: hasFaces, hasHumans: hasHumans, labels: labels)
+        // Full ClassificationLabel objects, not just identifiers -- confidence
+        // travels with each label now so CategoryMapper can apply its own,
+        // higher-than-the-top-5-floor confidence bar for accepting a category
+        // match (see CategoryMapper.categoryMatchConfidenceThreshold).
+        let category = CategoryMapper.shared.category(hasFaces: hasFaces, hasHumans: hasHumans, labels: raw.classificationLabels)
         let bestQuality = raw.faceObservations.compactMap { $0.captureQuality?.score }.max() ?? 0
 
         return PhotoScore(
