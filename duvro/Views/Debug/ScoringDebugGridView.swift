@@ -35,9 +35,29 @@ struct ScoringDebugGridView: View {
         failedCount > 0 ? "scoring debug (\(scores.count) ok, \(failedCount) failed)" : "scoring debug (\(scores.count))"
     }
 
+    /// This is the diagnostic the "is EXIF DateTimeOriginal actually
+    /// captured on the real PHPicker path" question turns on -- a prior
+    /// session measured 93% via DebugFixture, which reads bundled files
+    /// directly off disk and never touches PHPicker's out-of-process
+    /// delivery at all, so that number said nothing about the real
+    /// import path. Counted over `photos` (everything actually
+    /// imported), not `scores` (rejected photos never reach Stage 2 but
+    /// still have a captureDate from import time, so they still count
+    /// here).
+    private var timestampCoverageText: String {
+        let withTimestamp = photos.count { $0.captureDate != nil }
+        return "\(withTimestamp)/\(photos.count) photos carried a usable capture date"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
+                Text(timestampCoverageText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color(hex: "777169"))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
                 if scores.isEmpty && failedCount > 0 {
                     failureBanner
                 }
@@ -171,6 +191,13 @@ private struct ScoreDetailView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         row("composite", String(format: "%.4f", score.compositeScore))
+                        // Diagnostic row this session added: PhotoScore
+                        // itself carries no captureDate (kept separate,
+                        // see that model's own file header) -- Photo does,
+                        // and this view already receives `photo`, it just
+                        // never had a row for it. Read directly off
+                        // `photo`, not `score`, for that reason.
+                        row("capture date", ScoreDetailView.formattedCaptureDate(photo.captureDate))
                         row("category", score.category.rawValue)
                         row("isUtility (raw Vision flag)", score.isUtility ? "yes" : "no")
                         row("hard rejected", score.rejectionReason?.displayDescription ?? "no")
@@ -216,5 +243,22 @@ private struct ScoreDetailView: View {
             Spacer()
             Text(value)
         }
+    }
+
+    private static let captureDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    /// "none (no EXIF DateTimeOriginal/TIFF DateTime)", not a blank
+    /// value or "nil" -- this row exists specifically to answer "is this
+    /// actually captured on the real PHPicker path," so the absent case
+    /// needs to read as clearly as the present one.
+    static func formattedCaptureDate(_ date: Date?) -> String {
+        guard let date else { return "none (no EXIF DateTimeOriginal/TIFF DateTime)" }
+        return captureDateFormatter.string(from: date)
     }
 }
