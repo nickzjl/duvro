@@ -206,6 +206,15 @@ private struct ScoreDetailView: View {
                         row("face count", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : "\(score.faceCount)")
                         row("best face quality", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : String(format: "%.4f", score.bestFaceQuality))
                         row("human count (body detection)", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : "\(score.humanCount)")
+                        // Payload metric additions this session --
+                        // largestFaceAreaRatio, width, height. dimensions
+                        // read from the ORIGINAL, orientation-corrected
+                        // (see PhotoScore.width's doc comment); the label
+                        // spells that out so a portrait photo showing
+                        // width < height here reads as confirmation, not
+                        // a surprise.
+                        row("largest face area ratio", score.isHardRejected ? "0 (Stage 2 skipped -- rejected)" : String(format: "%.4f", score.largestFaceAreaRatio))
+                        row("width x height (orientation-corrected)", ScoreDetailView.formattedDimensions(width: score.width, height: score.height))
                         row("group bonus", String(format: "%.2f", score.groupBonus))
                         row("clip penalty", "\(String(format: "%.3f", score.clipPenalty)) (\(score.faceBoxes.count) face box(es), \(score.humanBoxes.count) human box(es) tested)")
                         row("feature print", score.isHardRejected ? "nil (Stage 2 skipped -- rejected)" : (score.featurePrint != nil ? "present" : "nil"))
@@ -260,5 +269,10 @@ private struct ScoreDetailView: View {
     static func formattedCaptureDate(_ date: Date?) -> String {
         guard let date else { return "none (no EXIF DateTimeOriginal/TIFF DateTime)" }
         return captureDateFormatter.string(from: date)
+    }
+
+    static func formattedDimensions(width: Int?, height: Int?) -> String {
+        guard let width, let height else { return "unreadable" }
+        return "\(width) x \(height)"
     }
 }

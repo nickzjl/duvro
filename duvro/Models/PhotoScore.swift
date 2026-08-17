@@ -45,13 +45,22 @@ struct PhotoScore: Identifiable, Sendable {
     /// against the eventual 4:5 crop window. [] for a rejected photo.
     let faceBoxes: [CGRect]
     let humanBoxes: [CGRect]
-    /// Source photo's width/height, read once via ImageIO (metadata only,
-    /// no decode) in ScoringService -- needed to know which axis the 4:5
-    /// crop actually trims, and by how much, since Vision's boxes are
-    /// normalized to the photo's OWN aspect ratio, not to 4:5. nil only if
-    /// the dimensions couldn't be read; `clipPenalty` treats that the same
-    /// as "nothing clipped" rather than guessing.
-    let sourceAspectRatio: Float?
+    /// Orientation-corrected source photo dimensions in pixels, read once
+    /// via ImageIO (metadata only, no decode) in ScoringService, FROM THE
+    /// ORIGINAL -- not the <=1280px downsample: a pixel count needs the
+    /// real resolution to mean anything (unlike a ratio, which is
+    /// scale-invariant and would read the same off either file).
+    /// Orientation-corrected because the raw stored buffer for an
+    /// EXIF-rotated photo has width and height SWAPPED relative to how it
+    /// actually displays -- the same bug class EditEngine's
+    /// renderFullResJPEGData already guards against
+    /// (.applyOrientationProperty) for the export path; ScoringService's
+    /// own read applies the equivalent correction by hand, since ImageIO's
+    /// metadata-only properties call has no transform option the way its
+    /// thumbnail generator does. nil only if the dimensions couldn't be
+    /// read at all.
+    let width: Int?
+    let height: Int?
     /// Top N classification labels above the confidence threshold, confidence-sorted descending.
     /// Computed in Stage 1, so present even for a rejected photo.
     let classificationLabels: [ClassificationLabel]
@@ -85,6 +94,21 @@ struct PhotoScore: Identifiable, Sendable {
     /// this by default -- same pattern as CompositeScoring, see that file).
     nonisolated var isHardRejected: Bool { rejectionReason != nil }
 
+    /// Derived from width/height rather than stored separately -- keeping
+    /// a third field in sync by hand with the two it's entirely computable
+    /// from is exactly the kind of redundancy that drifts. nil under the
+    /// same condition width/height's own doc comment describes
+    /// (dimensions unreadable, or a corrupt height of 0); clipPenalty's
+    /// "nothing clipped" fallback below is unaffected by this being
+    /// computed instead of stored -- it already treated nil the same way.
+    /// Needed to know which axis the eventual 4:5 crop actually trims, and
+    /// by how much, since Vision's face/human boxes are normalized to the
+    /// photo's OWN aspect ratio, not to 4:5.
+    nonisolated var sourceAspectRatio: Float? {
+        guard let width, let height, height > 0 else { return nil }
+        return Float(width) / Float(height)
+    }
+
     // MARK: - Derived
 
     let groupBonus: Float
@@ -94,6 +118,20 @@ struct PhotoScore: Identifiable, Sendable {
     /// clipped, same as every other photo.
     let clipPenalty: Float
     let compositeScore: Float
+    /// Largest detected face's bounding box area as a fraction of the
+    /// total image area, 0...1. Vision's face/human boxes are already
+    /// normalized to the photo's own [0,1]x[0,1] extent (see faceBoxes'
+    /// own doc comment), so box.width * box.height IS that fraction
+    /// directly -- no aspect-ratio correction needed, unlike clipPenalty's
+    /// crop-window math above. 0, not nil, when there are no faces --
+    /// matching every sibling face-derived field already on this type
+    /// (faceCount, bestFaceQuality, humanCount all use 0 as their own "no
+    /// signal" value; nil would be the one inconsistent field here, and
+    /// this is a plain Float everywhere it's read, same as those).
+    /// Distinguishes "one small person in a landscape," "one close-up
+    /// selfie," and "one full-body portrait" -- all faceCount 1, but very
+    /// different largestFaceAreaRatio.
+    let largestFaceAreaRatio: Float
 
     init(
         id: UUID,
@@ -104,7 +142,8 @@ struct PhotoScore: Identifiable, Sendable {
         humanCount: Int = 0,
         faceBoxes: [CGRect] = [],
         humanBoxes: [CGRect] = [],
-        sourceAspectRatio: Float? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
         classificationLabels: [ClassificationLabel],
         category: PhotoCategory,
         featurePrint: FeaturePrintObservation?,
@@ -120,7 +159,8 @@ struct PhotoScore: Identifiable, Sendable {
         self.humanCount = humanCount
         self.faceBoxes = faceBoxes
         self.humanBoxes = humanBoxes
-        self.sourceAspectRatio = sourceAspectRatio
+        self.width = width
+        self.height = height
         self.classificationLabels = classificationLabels
         self.category = category
         self.featurePrint = featurePrint
@@ -128,8 +168,9 @@ struct PhotoScore: Identifiable, Sendable {
         self.textBlockCount = textBlockCount
         self.rejectionReason = rejectionReason
         self.groupBonus = faceCount >= 2 ? 1.0 : 0.0
-        if let sourceAspectRatio {
-            let cropWindow = CompositeScoring.normalizedCropWindow(sourceAspect: sourceAspectRatio)
+        self.largestFaceAreaRatio = faceBoxes.map { Float($0.width * $0.height) }.max() ?? 0
+        if let width, let height, height > 0 {
+            let cropWindow = CompositeScoring.normalizedCropWindow(sourceAspect: Float(width) / Float(height))
             self.clipPenalty = CompositeScoring.clipPenalty(faceBoxes: faceBoxes, humanBoxes: humanBoxes, cropWindow: cropWindow)
         } else {
             self.clipPenalty = 0

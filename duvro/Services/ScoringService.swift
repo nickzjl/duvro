@@ -175,7 +175,8 @@ final class ScoringService {
             humanCount: raw.humanCount,
             faceBoxes: raw.faceObservations.map { $0.boundingBox.cgRect },
             humanBoxes: raw.humanBoxes,
-            sourceAspectRatio: raw.sourceAspectRatio,
+            width: raw.width,
+            height: raw.height,
             classificationLabels: raw.classificationLabels,
             category: category,
             featurePrint: raw.featurePrint,
@@ -197,11 +198,14 @@ final class ScoringService {
         /// counted, unlike humanCount above) so the clip-penalty check has
         /// something to test against the eventual 4:5 crop.
         let humanBoxes: [CGRect]
-        /// Source photo's width/height (from photo.downsampledURL, read via
-        /// ImageIO metadata only -- no decode). nil if unreadable; the
-        /// clip-penalty check then treats it the same as "nothing clipped"
-        /// rather than guessing an aspect ratio.
-        let sourceAspectRatio: Float?
+        /// Orientation-corrected source photo dimensions (from
+        /// photo.originalURL, NOT downsampledURL -- see imageDimensions'
+        /// own doc comment for why the real, not scaled, resolution
+        /// matters here). ImageIO metadata only -- no decode. nil if
+        /// unreadable; the clip-penalty check then treats that the same
+        /// as "nothing clipped" rather than guessing an aspect ratio.
+        let width: Int?
+        let height: Int?
         let classificationLabels: [ClassificationLabel]
         let featurePrint: FeaturePrintObservation?
         let textCoverage: Float
@@ -217,7 +221,7 @@ final class ScoringService {
     nonisolated private static func scorePhoto(_ photo: Photo) async -> ScoreOutcome {
         do {
             let handler = ImageRequestHandler(photo.downsampledURL)
-            let sourceAspectRatio = imageAspectRatio(at: photo.downsampledURL)
+            let dimensions = imageDimensions(at: photo.originalURL)
 
             // MARK: Stage 1 -- aesthetics + classification + text recognition.
             let textRequest: RecognizeTextRequest = {
@@ -265,7 +269,8 @@ final class ScoringService {
                     faceObservations: [],
                     humanCount: 0,
                     humanBoxes: [],
-                    sourceAspectRatio: sourceAspectRatio,
+                    width: dimensions?.width,
+                    height: dimensions?.height,
                     classificationLabels: labels,
                     featurePrint: nil,
                     textCoverage: textCoverage,
@@ -298,7 +303,8 @@ final class ScoringService {
                 faceObservations: faces,
                 humanCount: humans.count,
                 humanBoxes: humans.map { $0.boundingBox.cgRect },
-                sourceAspectRatio: sourceAspectRatio,
+                width: dimensions?.width,
+                height: dimensions?.height,
                 classificationLabels: labels,
                 featurePrint: featurePrint,
                 textCoverage: textCoverage,
@@ -315,22 +321,38 @@ final class ScoringService {
         }
     }
 
-    /// Width / height of the source photo, read via ImageIO metadata only
-    /// (CGImageSourceCopyPropertiesAtIndex -- no decode) for
-    /// CompositeScoring's clip-penalty check, which needs to know which
-    /// axis the eventual 4:5 crop trims. Same metadata-only technique
-    /// already used elsewhere in the app (ExportService's diagnostic,
-    /// PhotoImportService.captureDate) -- cheap, no new decode cost added
-    /// to the scoring pass.
-    nonisolated private static func imageAspectRatio(at url: URL) -> Float? {
+    /// Orientation-corrected width/height of the source photo, read from
+    /// the ORIGINAL (not the <=1280px downsample -- see PhotoScore.width's
+    /// own doc comment for why absolute pixel counts need the real file,
+    /// unlike a ratio which is scale-invariant) via ImageIO metadata only
+    /// (CGImageSourceCopyPropertiesAtIndex -- no decode). Same
+    /// metadata-only technique already used elsewhere in the app
+    /// (ExportService's diagnostic, PhotoImportService.captureDate) --
+    /// cheap, no new decode cost added to the scoring pass.
+    ///
+    /// ORIENTATION: kCGImagePropertyPixelWidth/Height are the RAW stored
+    /// buffer's dimensions, not what the photo actually displays as --
+    /// for an EXIF-rotated photo (orientation 5-8: leftMirrored, right,
+    /// rightMirrored, left -- CGImagePropertyOrientation's own raw
+    /// values, confirmed against the actual enum, not assumed) the buffer
+    /// is stored 90° rotated from its displayed orientation, so width and
+    /// height are swapped relative to how the photo looks. This is the
+    /// exact bug class that already bit the export path (EditEngine's
+    /// renderFullResJPEGData needed .applyOrientationProperty for the
+    /// same reason) -- unlike that path, ImageIO's metadata-only
+    /// properties call has no transform option, so the swap is done here
+    /// by hand rather than relying on a decode-time flag. Orientations
+    /// 1-4 (normal, flipped, 180°, flipped+180°) never swap the axes.
+    nonisolated private static func imageDimensions(at url: URL) -> (width: Int, height: Int)? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
-              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat,
-              height > 0 else {
+              let rawWidth = properties[kCGImagePropertyPixelWidth] as? Int,
+              let rawHeight = properties[kCGImagePropertyPixelHeight] as? Int else {
             return nil
         }
-        return Float(width / height)
+        let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+        let swapped = (5...8).contains(orientation)
+        return swapped ? (rawHeight, rawWidth) : (rawWidth, rawHeight)
     }
 
     /// Coverage = fraction of the frame covered by text bounding boxes,
