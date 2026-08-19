@@ -112,7 +112,7 @@ New packs ship whenever a good idea comes — no fixed cadence. Pack architectur
 | Showcase-then-edit flow hides a bad selection until late | The final review screen is the safety net: full preview, remove, and runner-up swaps before anything is final |
 | Edits look mid → no differentiation | Timebox dedicated days purely on filter tuning against reference photos; test with target-persona users on TestFlight |
 | IG handoff friction feels like a broken promise | Posting instructions on the handoff screen; copy everywhere says "prepped, not posted" |
-| Per-session API cost runs against a "100% free" product | Hard daily spend cap on the Vercel endpoint; payload is deliberately small (~30 downsampled thumbnails + 5 metrics each, not the full roll); measure real per-session cost pre-launch and revisit if it doesn't hold at scale |
+| Per-session API cost runs against a "100% free" product | Hard daily spend cap on the Vercel endpoint; payload is deliberately small (~30 thumbnails downsampled to ~512px + 8 metrics each, not the full roll); measure real per-session cost pre-launch and revisit if it doesn't hold at scale |
 | Added latency (the curation network round-trip) delays the showcase — the app's signature, most screen-recordable moment | Curation progress screen already accommodates an indeterminate wait (no percentage; UI_NOTES §4); keep the Stage 2 payload minimal to bound call time; measure end-to-end curation time on TestFlight and re-tune if it dulls the showcase's impact |
 | Offline or endpoint failure blocks curation entirely | Needs a fallback so a user without a connection still gets a post — see BUILD_ROADMAP's offline-fallback note (flagged there as a decision made under time pressure, may be revisited) |
 
