@@ -56,6 +56,28 @@ final class SessionStore {
     /// answerable after the user starts reordering/removing/swapping.
     private(set) var chosenSelection: FallbackSelectionResult?
     private(set) var runnerUps: [PhotoScore] = []
+    /// Phase 3.5: CurationService's per-photo role ("hero", "portrait",
+    /// "outfit", "candid", "social", "place", "food", "detail",
+    /// "atmosphere"), keyed by photo id. Empty when the fallback path
+    /// ran instead -- FallbackSelectionService has no concept of role.
+    /// Stored for the showcase/debug views to consume later; not read by
+    /// either this session.
+    private(set) var photoRoles: [UUID: String] = [:]
+    /// Phase 3.5: the detail behind `runnerUps` above -- CurationService's
+    /// alternates carry a type ("swap"/"extension"), which chosen photo a
+    /// swap could replace, a role, and the model's own reason. `runnerUps`
+    /// is what FinalReviewView's existing "what we left out" row already
+    /// reads (same [PhotoScore] shape FallbackSelectionService's own
+    /// runner-ups already produce); this is the richer data alongside it,
+    /// for a future debug view. Empty when the fallback path ran.
+    private(set) var alternateInfo: [UUID: CurationService.AlternateInfo] = [:]
+    /// Phase 3.5/9: rank-ordered caption suggestions from the SAME
+    /// curation call (the endpoint returns captions alongside the
+    /// selection -- no separate network round-trip at the caption screen
+    /// itself). Empty when the fallback path ran -- CaptionView's
+    /// CurationCaptionService falls through to local templates in that
+    /// case (see CaptionService.swift).
+    private(set) var curationCaptions: [String] = []
 
     // MARK: - Phase 5/6 working state
 
@@ -111,6 +133,18 @@ final class SessionStore {
 
     func setRunnerUps(_ runnerUps: [PhotoScore]) {
         self.runnerUps = runnerUps
+    }
+
+    func setPhotoRoles(_ roles: [UUID: String]) {
+        photoRoles = roles
+    }
+
+    func setAlternateInfo(_ info: [UUID: CurationService.AlternateInfo]) {
+        alternateInfo = info
+    }
+
+    func setCurationCaptions(_ captions: [String]) {
+        curationCaptions = captions
     }
 
     // MARK: - Lookups

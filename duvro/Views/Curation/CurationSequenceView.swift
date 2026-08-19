@@ -602,21 +602,23 @@ struct CurationSequenceView: View {
 
         let shortlist = ShortlistService.buildShortlist(from: sessionStore.scores)
         sessionStore.setShortlist(shortlist)
-        let chosen = FallbackSelectionService.select(from: shortlist, count: count)
-        sessionStore.setChosenSelection(chosen)
-        sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+
+        let selected = await resolveSelection(shortlist: shortlist)
 
         // Phase 10: caught HERE, before any shuffle-to-collage animation
         // or EditFlowView handoff -- see Phase.empty's own doc comment
         // for what this replaces. Deliberately does NOT call onComplete()
         // -- there is nothing to edit, so auto-advancing into EditFlowView
-        // is exactly the bug this exists to avoid.
-        guard !chosen.selected.isEmpty else {
+        // is exactly the bug this exists to avoid. Also the correct
+        // response to CurationService's own `insufficientStrongPhotos`
+        // case -- see resolveSelection's doc comment on why THAT doesn't
+        // fall back to on-device selection either.
+        guard !selected.isEmpty else {
             withAnimation(.easeOut(duration: 0.3)) { phase = .empty }
             return
         }
 
-        finalSelection = chosen.selected
+        finalSelection = selected
 
         // Kick off rendering immediately, off-thread, so it's ready (or
         // close to it) by the time the collage phase actually reveals
@@ -641,6 +643,49 @@ struct CurationSequenceView: View {
 
         realWorkDone = true
         checkReadyToResolve()
+    }
+
+    /// Tries CurationService first; on ANY failure (network, timeout,
+    /// non-200, malformed response -- see CurationService.curate's own
+    /// doc comment for the exact contract), falls back to
+    /// FallbackSelectionService so the user is never left with nothing.
+    /// This is the ONE place that decision is made -- everything else in
+    /// this file just reacts to whichever `selected` this returns.
+    ///
+    /// `insufficientStrongPhotos` (a SUCCESSFUL call that found nothing
+    /// worth curating -- confirmed as a real 200 response, not
+    /// hypothetical) is deliberately NOT treated as a failure: it returns
+    /// a non-nil Result with an empty `selected`, which this function
+    /// passes straight through rather than falling back to on-device
+    /// selection. Running FallbackSelectionService there would show a
+    /// post the model already looked at and rejected -- worse than the
+    /// honest "nothing quite made the cut" state, not better.
+    private func resolveSelection(shortlist: ShortlistResult) async -> [PhotoScore] {
+        let candidates = shortlist.shortlisted.compactMap { score -> (score: PhotoScore, photo: Photo)? in
+            guard let photo = sessionStore.photo(for: score.id) else { return nil }
+            return (score, photo)
+        }
+
+        if let result = await CurationService.curate(candidates: candidates, clusterID: shortlist.clusterID, tier: .basic, vibePack: pack.id) {
+            sessionStore.setChosenSelection(FallbackSelectionResult(selected: result.selected, orderedByTimestamp: false))
+            sessionStore.setPhotoRoles(result.roles)
+            sessionStore.setRunnerUps(result.runnerUps)
+            sessionStore.setAlternateInfo(result.alternateInfo)
+            sessionStore.setCurationCaptions(result.captions)
+            return result.selected
+        }
+
+        // Failure path -- exactly the pre-existing on-device pipeline,
+        // unchanged. Roles/alternateInfo/curationCaptions cleared (not
+        // left over from some earlier attempt) since none of this
+        // session's data is curation-derived.
+        let chosen = FallbackSelectionService.select(from: shortlist, count: count)
+        sessionStore.setChosenSelection(chosen)
+        sessionStore.setRunnerUps(RunnerUpService.compute(shortlist: shortlist, chosen: chosen.selected))
+        sessionStore.setPhotoRoles([:])
+        sessionStore.setAlternateInfo([:])
+        sessionStore.setCurationCaptions([])
+        return chosen.selected
     }
 
     private func checkReadyToResolve() {
