@@ -45,6 +45,11 @@ struct ImportView: View {
     /// changing later (same defensive spirit as continueButton's own
     /// comment on realFlowPack).
     @State private var hasStartedAutoScoring = false
+    /// Guards the cellular-permission prewarm below against firing
+    /// twice, same reasoning as hasStartedAutoScoring above -- separate
+    /// flag because it's a separate concern (network permission, not
+    /// scoring) that happens to fire on the same transition.
+    @State private var hasTriggeredCellularPrewarm = false
 
     // MARK: - Phase 8, Task 4: the real (non-DEBUG) post-import flow
     /// ONE persistent fullScreenCover for the whole real flow -- shown
@@ -336,6 +341,21 @@ struct ImportView: View {
             // against an empty score set.
             sessionStore.setScoring(true)
             Task { await scoringService.score(photos: importService.photos) }
+
+            // iOS shows its one-time cellular-permission dialog on the
+            // app's first cellular network request, with no API to
+            // trigger it directly. Firing a discarded, tiny request here
+            // -- the same import-complete transition that starts
+            // scoring above -- gets that dialog out of the way while the
+            // user is browsing vibe packs, rather than mid-curation
+            // where it previously cancelled a real curation request out
+            // from under it (see CurationService.performRequest's retry
+            // for the other half of that fix). Own guard flag, not
+            // hasStartedAutoScoring -- same trigger point, different
+            // concern.
+            guard !hasTriggeredCellularPrewarm else { return }
+            hasTriggeredCellularPrewarm = true
+            Task { await CurationService.prewarmCellularPermission() }
         }
         #if DEBUG
         .sheet(isPresented: $showScoringGrid) {

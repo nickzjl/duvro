@@ -38,6 +38,20 @@
 //  candidate from the request entirely rather than sending a fabricated
 //  width/height (see that function's own doc comment).
 //
+//  NETWORK RESILIENCE (added after the first real device run): a first
+//  on-device attempt failed because iOS's cellular-permission dialog
+//  appeared WHILE the curation request was in flight -- the OS cancels
+//  a request out from under URLSession when that happens, and by the
+//  time the dialog was dismissed FallbackSelectionService had already
+//  run. Two-sided fix: `performRequest` retries once, after a short
+//  delay, on any network-class failure (a thrown error before an HTTP
+//  response ever arrived -- NOT a non-200 status, which already got a
+//  definitive answer and won't succeed twice); and
+//  `prewarmCellularPermission`, called by ImportView the moment import
+//  finishes, fires a tiny discarded request specifically to get that
+//  dialog out of the way early, while the user is still browsing vibe
+//  packs. The retry is the safety net; the prewarm is the actual fix.
+//
 
 import Foundation
 
@@ -62,6 +76,19 @@ nonisolated enum CurationService {
     /// with pixel count, per the spec), and not the original either
     /// (same reason, worse).
     private static let thumbnailMaxPixelSize: CGFloat = 512
+
+    /// One retry on a network-class failure (see `performRequest`) --
+    /// the incident that motivated this: iOS's cellular-permission
+    /// dialog appeared WHILE a curation request was in flight, which
+    /// cancels the request out from under URLSession; by the time the
+    /// dialog was dismissed, FallbackSelectionService had already run.
+    /// A short-delayed retry catches that window, and covers ordinary
+    /// flakiness the same way. `prewarmCellularPermission` below
+    /// addresses the same incident from the other side -- getting the
+    /// dialog to appear well before curation ever starts, so this retry
+    /// is a safety net, not the primary fix.
+    private static let maxNetworkRetries = 1
+    private static let networkRetryDelay: Duration = .seconds(2)
 
     // MARK: - Result
 
@@ -176,20 +203,7 @@ nonisolated enum CurationService {
             return nil
         }
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch let error as URLError where error.code == .timedOut {
-            logFailure(.timeout, vibePack: vibePack, photoCount: photos.count)
-            return nil
-        } catch {
-            logFailure(.network(error), vibePack: vibePack, photoCount: photos.count)
-            return nil
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            logFailure(.network(URLError(.badServerResponse)), vibePack: vibePack, photoCount: photos.count)
+        guard let (data, httpResponse) = await performRequest(request, vibePack: vibePack, photoCount: photos.count) else {
             return nil
         }
         guard httpResponse.statusCode == 200 else {
@@ -211,6 +225,47 @@ nonisolated enum CurationService {
         } catch {
             logFailure(.malformedResponse(error), vibePack: vibePack, photoCount: photos.count)
             return nil
+        }
+    }
+
+    /// Retries ONLY a network-class failure -- a thrown error from
+    /// `URLSession.data(for:)` means the request never reached the
+    /// server at all (no connectivity, DNS failure, connection lost,
+    /// timed out, cancelled mid-flight by the OS -- see the cellular-
+    /// permission incident in maxNetworkRetries' own doc comment), so a
+    /// second attempt has a real chance of succeeding. Deliberately does
+    /// NOT retry a non-200 HTTP response (validation errors, 502s) --
+    /// those already reached the server and got a definitive answer;
+    /// `curate` handles that status check itself, on whatever this
+    /// returns. The stray "response wasn't even HTTP" cast failure is
+    /// also left un-retried -- not a thrown network error, and not a
+    /// case expected to occur against an https:// endpoint in practice.
+    private static func performRequest(
+        _ request: URLRequest,
+        vibePack: String,
+        photoCount: Int
+    ) async -> (Data, HTTPURLResponse)? {
+        var attempt = 0
+        while true {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    logFailure(.network(URLError(.badServerResponse)), vibePack: vibePack, photoCount: photoCount)
+                    return nil
+                }
+                return (data, httpResponse)
+            } catch {
+                guard attempt < maxNetworkRetries else {
+                    let isTimeout = (error as? URLError)?.code == .timedOut
+                    logFailure(isTimeout ? .timeout : .network(error), vibePack: vibePack, photoCount: photoCount)
+                    return nil
+                }
+                attempt += 1
+                #if DEBUG
+                print("[curation] network-class failure (\(error.localizedDescription)) -- retrying once after \(networkRetryDelay)")
+                #endif
+                try? await Task.sleep(for: networkRetryDelay)
+            }
         }
     }
 
@@ -282,6 +337,28 @@ nonisolated enum CurationService {
         } catch {
             return nil
         }
+    }
+
+    // MARK: - Cellular-permission prewarm
+
+    /// iOS shows its one-time "Allow Cellular Data?" dialog on the app's
+    /// FIRST cellular network request -- there's no API to request it
+    /// directly. ImportView calls this once, the moment import
+    /// finishes, so the dialog appears while the user is browsing vibe
+    /// packs rather than mid-curation, where it previously cancelled a
+    /// real curation request out from under URLSession (see
+    /// maxNetworkRetries' own doc comment for the incident this and
+    /// that retry both address, from opposite ends). A HEAD request to
+    /// the curation endpoint itself, not an unrelated host -- this also
+    /// warms DNS/TLS for the same host the real call hits shortly
+    /// after. Both the result and any error are discarded by design;
+    /// this exists purely for its side effect on the OS's permission
+    /// state, never for anything in its response.
+    static func prewarmCellularPermission() async {
+        var request = URLRequest(url: endpointURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 10
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     // MARK: - Response resolution
