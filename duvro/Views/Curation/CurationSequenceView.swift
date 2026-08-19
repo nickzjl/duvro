@@ -41,6 +41,30 @@
 //  yet, real work is usually near-instant, so without a floor this
 //  screen would flash by (see its own doc comment). Release has NO
 //  floor: "the screen lasts exactly as long as the real work takes."
+//  This remains true unmodified with CurationService's real 20-45s
+//  network call in the picture: the floor is a MINIMUM wait, not a
+//  timeout, so a slow real call just makes realWorkDone flip true
+//  later and checkReadyToResolve proceeds correctly whenever it does.
+//
+//  PROGRESS LINE PACING (added once CurationService's real network
+//  latency was exercised on-device): startProgressCreep's asymptotic
+//  climb toward 92% was tuned when "real work" meant the on-device
+//  shortlist/fallback pipeline, near-instant in practice -- at its
+//  original rate the line filled to ~92% in a few seconds and then
+//  sat nearly flat, which was invisible before because everything
+//  finished before anyone would notice. A curation network call
+//  routinely runs 20-60s, and the same fixed rate made the line look
+//  finished within the first ~6 seconds, then frozen for the rest --
+//  exactly what UI_NOTES §4's "runs as long as scoring takes" warns
+//  against. curationCallInFlight (set only around
+//  resolveSelection's CurationService.curate call) switches
+//  startProgressCreep to a much slower rate for exactly that window,
+//  so the line keeps visibly advancing across the endpoint's real
+//  latency instead of stalling early -- see that function's own doc
+//  comment for the exact numbers and reasoning. Every path that never
+//  makes a network call (offline, no candidates, or a DEBUG fixture
+//  run) never sets the flag, so it keeps the original fast pacing
+//  unchanged.
 //
 //  STATUS COPY: settled -- UI_NOTES §4's 2nd line is "finding familiar
 //  faces…". Two replacements were tried and rejected during this
@@ -325,6 +349,13 @@ struct CurationSequenceView: View {
     @State private var statusTimerTask: Task<Void, Never>?
     @State private var progressFraction: Double = 0
     @State private var progressTimerTask: Task<Void, Never>?
+    /// True only while CurationService.curate's network round trip
+    /// (including its own retry -- see that type) is actually
+    /// outstanding; toggled by resolveSelection. startProgressCreep
+    /// reads it each tick to pick a pacing rate -- see that function's
+    /// own doc comment for why the endpoint's real latency needed a
+    /// second, much slower regime.
+    @State private var curationCallInFlight = false
 
     // MARK: - Real work
 
@@ -569,17 +600,39 @@ struct CurationSequenceView: View {
     /// duration assumed (Release's real duration is unknown ahead of
     /// time), so this just keeps nudging toward the ceiling for as long
     /// as `checkReadyToResolve` hasn't fired the final 100% + resolve.
-    /// In DEBUG this naturally paces to debugMinimumDuration, since the
-    /// loop only stops once BOTH gates (real work done AND the minimum
-    /// elapsed) are true -- real work alone finishing early (the
-    /// typical DEBUG case) doesn't stop it. See file header.
+    ///
+    /// TWO PACING REGIMES, chosen per tick from curationCallInFlight.
+    /// The original 0.3 per-tick rate was tuned back when real work
+    /// (the on-device shortlist/fallback pipeline) finished in well
+    /// under a second -- at that rate the line reaches ~92% in about 6
+    /// ticks (~3.6s) and then barely creeps for however much longer
+    /// remains, which read fine when "however much longer" was itself
+    /// under a second (or, in DEBUG, was masked by debugMinimumDuration
+    /// finishing the phase before it became visible). Once
+    /// CurationService's real 20-45s network call became the common
+    /// case, that same fast rate filled the line almost immediately and
+    /// then sat nearly flat for the remaining 15-40+ seconds --
+    /// "fills early and freezes," exactly what UI_NOTES §4 says not to
+    /// do. While curationCallInFlight is true, a much slower rate
+    /// (0.035) keeps the line visibly climbing across that whole
+    /// window instead -- at the endpoint's typical 20-45s it reads
+    /// roughly 75-85% when the call resolves, never appearing finished
+    /// early, and it keeps creeping (never truly stalling, same
+    /// asymptotic math as before) if a slow call runs past that. Falls
+    /// straight back to the fast 0.3 rate the instant the flag clears
+    /// (call returned, success or fail) -- that's also every path that
+    /// never makes a network call at all (no candidates, offline, or a
+    /// DEBUG fixture run where curate() bails before ever reaching the
+    /// network -- see CurationService's own known-gap note), which
+    /// keeps the original DEBUG/near-instant pacing exactly as it was.
     private func startProgressCreep() {
         progressTimerTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(600))
                 guard !Task.isCancelled else { return }
+                let rate = curationCallInFlight ? 0.035 : 0.3
                 withAnimation(.easeOut(duration: 0.6)) {
-                    progressFraction += (0.92 - progressFraction) * 0.3
+                    progressFraction += (0.92 - progressFraction) * rate
                 }
             }
         }
@@ -666,7 +719,16 @@ struct CurationSequenceView: View {
             return (score, photo)
         }
 
-        if let result = await CurationService.curate(candidates: candidates, clusterID: shortlist.clusterID, tier: .basic, vibePack: pack.id) {
+        // curationCallInFlight brackets the ENTIRE call, including
+        // payload building and CurationService's own retry -- see
+        // startProgressCreep's doc comment for what this drives. Reset
+        // to false unconditionally once curate() returns, success or
+        // failure alike.
+        curationCallInFlight = true
+        let result = await CurationService.curate(candidates: candidates, clusterID: shortlist.clusterID, tier: .basic, vibePack: pack.id)
+        curationCallInFlight = false
+
+        if let result {
             sessionStore.setChosenSelection(FallbackSelectionResult(selected: result.selected, orderedByTimestamp: false))
             sessionStore.setPhotoRoles(result.roles)
             sessionStore.setRunnerUps(result.runnerUps)
