@@ -72,3 +72,28 @@ struct TemplateCaptionService: CaptionServiceProtocol {
         ]
     ]
 }
+
+/// Phase 3.5: wraps captions the curation call ALREADY returned, rank-
+/// ordered, alongside the selection itself (SessionStore.curationCaptions
+/// -- see CurationService.Result.captions' own doc comment for why this
+/// isn't a second network round-trip made from CaptionView). "regenerate"
+/// walks the rank-ordered list -- `captions.filter { !used.contains($0) }`
+/// preserves the array's own order, so the first not-yet-shown caption is
+/// always the next-best-ranked one, not a random pick. Falls through to
+/// TemplateCaptionService (BUILD_ROADMAP Phase 9's required offline
+/// fallback, unchanged) once every returned caption has been shown, OR
+/// immediately if `captions` is empty to begin with -- the same fallback
+/// path this takes when the curation call itself failed and
+/// FallbackSelectionService ran instead (SessionStore.curationCaptions
+/// stays [] in that case).
+struct CurationCaptionService: CaptionServiceProtocol {
+    let captions: [String]
+    private let fallback = TemplateCaptionService()
+
+    func caption(packID: String, excluding used: Set<String>) async -> String {
+        if let next = captions.first(where: { !used.contains($0) }) {
+            return next
+        }
+        return await fallback.caption(packID: packID, excluding: used)
+    }
+}

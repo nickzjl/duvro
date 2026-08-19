@@ -407,7 +407,7 @@ struct ImportView: View {
         }
         .fullScreenCover(isPresented: $showCaptionDebug) {
             debugFlowDestination { pack in
-                CaptionView(sessionStore: sessionStore, pack: pack) {
+                CaptionView(sessionStore: sessionStore, pack: pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions)) {
                     showCaptionDebug = false
                     showFinalReviewDebug = true
                 } onContinue: { text in
@@ -424,7 +424,7 @@ struct ImportView: View {
         }
         .fullScreenCover(isPresented: $showCaptionDebugStandalone) {
             debugFlowDestination { pack in
-                CaptionView(sessionStore: sessionStore, pack: pack, onBack: { showCaptionDebugStandalone = false }, onContinue: { _ in })
+                CaptionView(sessionStore: sessionStore, pack: pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions), onBack: { showCaptionDebugStandalone = false }, onContinue: { _ in })
             }
         }
         .fullScreenCover(isPresented: $showVibeSelectDebug) {
@@ -483,7 +483,7 @@ struct ImportView: View {
             if showHandoffReal {
                 HandoffView(sessionStore: sessionStore, pack: realFlowPack, caption: realFlowCaption)
             } else if showCaptionReal {
-                CaptionView(sessionStore: sessionStore, pack: realFlowPack) {
+                CaptionView(sessionStore: sessionStore, pack: realFlowPack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions)) {
                     showCaptionReal = false
                 } onContinue: { text in
                     realFlowCaption = text
@@ -608,7 +608,7 @@ struct ImportView: View {
             if showVibeSelectDebugHandoff {
                 HandoffView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack, caption: vibeSelectDebugCaption)
             } else if showVibeSelectDebugCaption {
-                CaptionView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack) {
+                CaptionView(sessionStore: sessionStore, pack: vibeSelectDebugResult.pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions)) {
                     showVibeSelectDebugCaption = false
                 } onContinue: { text in
                     vibeSelectDebugCaption = text

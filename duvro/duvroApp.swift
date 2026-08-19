@@ -214,7 +214,7 @@ struct DebugLaunchRootView: View {
                     case .packPreview:
                         packPreviewDestination(pack: pack)
                     case .caption:
-                        CaptionView(sessionStore: sessionStore, pack: pack, onBack: {}, onContinue: { _ in })
+                        CaptionView(sessionStore: sessionStore, pack: pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions), onBack: {}, onContinue: { _ in })
                     case .vibeSelect, .welcome, .shortlistDebug:
                         EmptyView() // unreachable -- all three handled above, before this branch is ever entered
                     case .advancedSheet:
@@ -246,7 +246,7 @@ struct DebugLaunchRootView: View {
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
                         } else if showCaption {
-                            CaptionView(sessionStore: sessionStore, pack: pack) {
+                            CaptionView(sessionStore: sessionStore, pack: pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions)) {
                                 showCaption = false
                             } onContinue: { text in
                                 handoffCaption = text
@@ -279,7 +279,7 @@ struct DebugLaunchRootView: View {
                         if showHandoff {
                             HandoffView(sessionStore: sessionStore, pack: pack, caption: handoffCaption)
                         } else if showCaption {
-                            CaptionView(sessionStore: sessionStore, pack: pack) {
+                            CaptionView(sessionStore: sessionStore, pack: pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions)) {
                                 showCaption = false
                             } onContinue: { text in
                                 handoffCaption = text
@@ -424,7 +424,7 @@ struct DebugLaunchRootView: View {
                 if showHandoff {
                     HandoffView(sessionStore: sessionStore, pack: vibeSelectResult.pack, caption: handoffCaption)
                 } else if showCaption {
-                    CaptionView(sessionStore: sessionStore, pack: vibeSelectResult.pack) {
+                    CaptionView(sessionStore: sessionStore, pack: vibeSelectResult.pack, captionService: CurationCaptionService(captions: sessionStore.curationCaptions)) {
                         showCaption = false
                     } onContinue: { text in
                         handoffCaption = text
