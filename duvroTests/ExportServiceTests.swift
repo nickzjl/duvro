@@ -265,13 +265,18 @@ struct ExportServiceTests {
     // MARK: - ExportService.creationDate: which end of the batch is newest
 
     @Test func firstPhotoGetsTheOldestDateLastPhotoGetsTheNewest() {
-        // This exact formula was wrong once already -- shipped with
-        // index 0 getting the newest date, based on an assumption about
-        // Instagram's picker order that on-device testing proved
-        // backwards (the picker showed the LAST-saved photo first, not
-        // the first-saved one). Verified directly here so a future
-        // change to this formula can't silently re-invert it without a
-        // test noticing.
+        // This formula controls the PHOTOS APP's ordering, not
+        // Instagram's -- Instagram's picker sorts by insertion order,
+        // which is ExportService.saveAll's reversed loop, not this.
+        // Two separate attempts to fix a picker-order bug by inverting
+        // THIS formula both failed for exactly that reason; see
+        // saveAll's doc comment. Pinned here so neither direction can be
+        // flipped again without a test noticing, and so the next person
+        // chasing picker order is pointed at the right mechanism.
+        //
+        // Photos lays the camera roll out oldest-first, so photo 1 being
+        // the oldest is what makes the exported post read in carousel
+        // order there.
         let now = Date()
         let count = 7
 
@@ -281,7 +286,7 @@ struct ExportServiceTests {
         let last = ExportService.creationDate(forIndex: count - 1, count: count, referenceDate: now)
         #expect(last == now, "the LAST photo should be the newest -- exactly referenceDate")
         #expect(first == now.addingTimeInterval(-6), "the FIRST photo should be the oldest -- (count-1) seconds before referenceDate")
-        #expect(first < last, "chronologically, photo 1 must predate photo 7 -- that's what makes it appear first in a picker sorted oldest-first")
+        #expect(first < last, "chronologically, photo 1 must predate photo 7 -- that's what makes the post read in carousel order in the Photos app")
 
         // Strictly ascending, 1 second apart, for every index in between
         // too -- not just the two ends.

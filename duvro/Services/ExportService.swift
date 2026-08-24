@@ -223,24 +223,19 @@ final class ExportService {
     /// permission (prd.md §4 step 10 / BUILD_ROADMAP Phase 7: "the first
     /// and only time the app asks" -- this app never asks for read access,
     /// PHPicker never required it), renders `items` via renderAll above,
-    /// then saves everything to the camera roll via saveAll. Staggers each
-    /// asset's creationDate 1 SECOND APART with the LAST item newest --
-    /// see saveAll's `secondsBeforeNewest` for the actual formula. This
-    /// was inverted (first item used to get the newest date) after
-    /// on-device testing: the FIRST item being newest was based on an
-    /// ASSUMED "Instagram's picker sorts most-recent-first" that turned
-    /// out to be backwards -- verified on device, the picker actually
-    /// showed the LAST-saved photo (whichever had the highest
-    /// creationDate) first, so the post's photo 1 (which needs to appear
-    /// first when the user taps through the picker) has to be the OLDEST
-    /// of the batch, not the newest. With no album to search, this
-    /// ordering is still what makes the post identifiable as a
-    /// contiguous block at all (see the MARK above) -- only WHICH END is
-    /// newest changed, not that they're staggered and contiguous. Dates
-    /// are anchored to `Date()` at call time (the newest one, now the
-    /// LAST item, sits exactly at `Date()`), not backdated, so the
-    /// photos don't bury themselves somewhere back in the user's camera
-    /// roll.
+    /// then saves everything to the camera roll via saveAll.
+    ///
+    /// ORDERING, in one line each -- the full reasoning is in saveAll's own
+    /// doc comment, which is the place to read before touching either:
+    ///   - Instagram's picker order comes from INSERTION ORDER (saveAll
+    ///     writes the post in reverse, photo 1 last, because the picker
+    ///     shows the most recently inserted asset first).
+    ///   - The Photos app's order comes from the staggered creationDate
+    ///     (1s apart, photo 1 OLDEST, anchored at `Date()` so the batch
+    ///     lands at the end of the roll rather than buried in it).
+    /// They point in opposite directions on purpose. Two earlier attempts
+    /// tried to fix Instagram by flipping creationDate and both failed --
+    /// creationDate was never the mechanism.
     ///
     /// `expectedCount` is HandoffView's sessionStore.post.count -- the
     /// number of photos the user actually chose. `items` is built via a
@@ -370,6 +365,50 @@ final class ExportService {
     /// time this runs (small JPEG Data, not decoded buffers -- see
     /// exportToPhotos), so there's no memory cost to one transaction over
     /// several, and one transaction is simpler.
+    ///
+    /// ====================================================================
+    /// TWO SEPARATE ORDERINGS, CONTROLLED BY TWO DIFFERENT MECHANISMS.
+    /// Read this before changing either. The assumption that creationDate
+    /// drives Instagram was wrong TWICE, and flipping it a third time will
+    /// not work either.
+    ///
+    ///   INSTAGRAM'S PICKER  <- controlled by INSERTION ORDER (the reversed
+    ///                          loop below). It does NOT sort by
+    ///                          creationDate. It shows the most recently
+    ///                          INSERTED asset first, so photo 1 must be
+    ///                          written LAST.
+    ///
+    ///   THE PHOTOS APP      <- controlled by creationDate (the stagger,
+    ///                          see `creationDate(forIndex:count:referenceDate:)`).
+    ///                          Photos lays the camera roll out
+    ///                          chronologically, oldest first, so photo 1
+    ///                          must be the OLDEST of the batch.
+    ///
+    /// The two therefore point in OPPOSITE directions, and that is correct,
+    /// not a bug: photo 1 is written last and dated earliest. Fixing one by
+    /// "making them consistent" breaks the other.
+    ///
+    /// HOW THIS WAS ESTABLISHED, since it cost two failed attempts: the
+    /// original shipped with photo 1 newest, which came out reversed;
+    /// inverting it so photo 1 was oldest came out reversed too. A sort key
+    /// that ignores both inversions isn't creationDate at all. Insertion
+    /// order was the one thing that never changed between those attempts
+    /// (photo 1 was written first in both), and photo 7 appeared first in
+    /// both -- which is exactly what "most recently inserted, first" predicts
+    /// and what neither creationDate direction predicts. An EXIF explanation
+    /// was investigated and ruled out empirically: the exported JPEG carries
+    /// no capture date at all, because PhotoImportService.downsample encodes
+    /// from a bare CGImage with no metadata dictionary, so there is nothing
+    /// embedded for Photos to prefer over what's set here. Confounders were
+    /// cleared on device before acting: exactly 7 assets (no duplicates) and
+    /// Instagram on Full, not Limited, Photo Access.
+    ///
+    /// Still not verifiable from this side: .addOnly authorization grants no
+    /// read access, so nothing here may fetch assets back to confirm what
+    /// persisted (an earlier diagnostic that tried crashed on device -- see
+    /// the note in the DEBUG block below). Confirmation is by eye, in
+    /// Instagram.
+    /// ====================================================================
     private nonisolated static func saveAll(_ rendered: [Data], referenceDate: Date) async throws {
         #if DEBUG
         // Diagnostic, separate from exportToPhotos' phase guard: that
@@ -408,11 +447,24 @@ final class ExportService {
             counter.count += 1
             print("[export] saveAll's performChanges block invoked (call #\(counter.count)) -- creating \(rendered.count) assets")
             #endif
-            for (index, data) in rendered.enumerated() {
+            // REVERSED ON PURPOSE -- iterating indices from last to first, so
+            // photo 7 is created first and photo 1 is created LAST. See this
+            // function's doc comment: insertion order, not creationDate, is
+            // what Instagram's picker actually sorts by, and it shows the
+            // most-recently-inserted asset first. Photo 1 has to be the last
+            // one written to be the first one the user sees there.
+            //
+            // `index` stays the photo's position in the POST (0 = photo 1)
+            // rather than its position in this loop, so each photo keeps its
+            // own creationDate regardless of the order they're written in.
+            // Using the loop's own iteration counter here instead would
+            // silently invert the dates too and undo the Photos-app ordering
+            // below -- the two orderings are deliberately opposite.
+            for index in rendered.indices.reversed() {
                 let creationRequest = PHAssetCreationRequest.forAsset()
                 let resourceOptions = PHAssetResourceCreationOptions()
                 resourceOptions.uniformTypeIdentifier = UTType.jpeg.identifier
-                creationRequest.addResource(with: .photo, data: data, options: resourceOptions)
+                creationRequest.addResource(with: .photo, data: rendered[index], options: resourceOptions)
                 creationRequest.creationDate = Self.creationDate(forIndex: index, count: rendered.count, referenceDate: referenceDate)
             }
         }
@@ -426,20 +478,28 @@ final class ExportService {
         #endif
     }
 
-    /// Pure and separately testable on purpose -- this exact formula was
-    /// wrong once already (the first version handed index 0 the newest
-    /// date, backwards, per an assumption about Instagram's picker order
-    /// that turned out to be false; see exportToPhotos' doc comment for
-    /// the on-device correction). `internal`, not `private`, specifically
-    /// so a unit test can call it directly without touching
-    /// PHPhotoLibrary at all.
-    ///
     /// index 0 (carousel position 1, the post's first photo) gets the
     /// OLDEST date; the LAST index gets `referenceDate` itself, i.e. the
-    /// newest. Verified on device: Instagram's picker shows the
-    /// highest-creationDate asset first, so the photo that needs to
-    /// appear first when the user taps through the picker has to be the
-    /// OLDEST of the batch, not the newest.
+    /// newest. Pure and separately testable on purpose -- `internal`, not
+    /// `private`, so a unit test can call it directly without touching
+    /// PHPhotoLibrary at all.
+    ///
+    /// THIS DOES NOT CONTROL INSTAGRAM'S PICKER ORDER. That is decided by
+    /// insertion order, in saveAll's reversed loop -- see the boxed note in
+    /// saveAll's doc comment for the full reasoning and for why two earlier
+    /// attempts to fix Instagram by changing THIS formula both failed.
+    /// Do not flip this direction to chase a picker-order bug; it has
+    /// already been tried in both directions and neither worked.
+    ///
+    /// What it does control:
+    ///   - THE PHOTOS APP, which lays the camera roll out chronologically
+    ///     with the oldest first. Photo 1 being the oldest is what makes
+    ///     the exported post read in carousel order there.
+    ///   - FINDABILITY. With no album to search (see the MARK above), the
+    ///     post is identifiable only as "the N most recent, contiguous
+    ///     assets" -- which needs the batch to be staggered and adjacent,
+    ///     anchored at `Date()` so it isn't buried back in the roll.
+    ///   - A DETERMINISTIC TIEBREAK anywhere else that does sort by date.
     nonisolated static func creationDate(forIndex index: Int, count: Int, referenceDate: Date) -> Date {
         let secondsBeforeNewest = Double(max(count - 1 - index, 0))
         return referenceDate.addingTimeInterval(-secondsBeforeNewest)
